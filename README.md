@@ -1,1 +1,2 @@
 # GeoResist
+postgresql://neondb_owner:npg_NxVqpYgDe2Z7@ep-quiet-star-anm3vrmo-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require

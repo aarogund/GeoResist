@@ -1,15 +1,19 @@
 package main
 
 import (
+	"georesist/database"
 	"georesist/handlers"
+	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"log"
 	"net/http"
 	"os"
-
-	"github.com/gorilla/mux"
 )
 
 func main() {
+	godotenv.Load()
+	database.Connect()
+	database.Migrate()
 	r := mux.NewRouter()
 
 	// auth routes
