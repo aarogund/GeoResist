@@ -7,7 +7,7 @@ type Measurement struct {
 	SerialNumber        int
 	MN2                 float64
 	Voltage             float64
-	Current             float64
+	ElectricCurrent             float64
 	Resistance          float64
 	GeometricFactor     float64
 	ApparentResistivity float64

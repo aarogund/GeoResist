@@ -1,6 +1,8 @@
 package database
 
-import "log"
+import (
+	"log"
+)
 
 func Migrate() {
 	queries := []string{
@@ -30,13 +32,13 @@ func Migrate() {
     		id                   SERIAL PRIMARY KEY,
     		survey_id            INTEGER REFERENCES surveys(id),
    			serial_number        INTEGER,
-  			ab2              DECIMAL(10,4) NOT NULL,
-   			mn2              DECIMAL(10,4) NOT NULL,
-    		voltage              DECIMAL(10,4),    ← nullable
-    		current              DECIMAL(10,4),    ← nullable
-   			resistance           DECIMAL(10,4),    ← nullable
-    		geometric_factor     DECIMAL(10,4),    ← nullable
-    		apparent_resistivity DECIMAL(10,4)     ← nullable
+  			ab2                  DECIMAL(10,4) NOT NULL,
+   			mn2                  DECIMAL(10,4) NOT NULL,
+    		voltage              DECIMAL(10,4),    
+    		electric_current     DECIMAL(10,4),    
+   			resistance           DECIMAL(10,4),    
+    		geometric_factor     DECIMAL(10,4),    
+    		apparent_resistivity DECIMAL(10,4)     
 )`,
 
 		`CREATE TABLE IF NOT EXISTS reports (
@@ -62,5 +64,6 @@ func Migrate() {
 			log.Fatal("Migration error:", err)
 		}
 	}
+
 	log.Println("Database migrated successfully!")
 }
