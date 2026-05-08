@@ -32,11 +32,11 @@ func Migrate() {
    			serial_number        INTEGER,
   			ab2              DECIMAL(10,4) NOT NULL,
    			mn2              DECIMAL(10,4) NOT NULL,
-    		voltage              DECIMAL(10,4),    ← nullable
-    		current              DECIMAL(10,4),    ← nullable
-   			resistance           DECIMAL(10,4),    ← nullable
-    		geometric_factor     DECIMAL(10,4),    ← nullable
-    		apparent_resistivity DECIMAL(10,4)     ← nullable
+    		voltage              DECIMAL(10,4),    
+    		current              DECIMAL(10,4),    
+   			resistance           DECIMAL(10,4),    
+    		geometric_factor     DECIMAL(10,4),    
+    		apparent_resistivity DECIMAL(10,4)     
 )`,
 
 		`CREATE TABLE IF NOT EXISTS reports (
