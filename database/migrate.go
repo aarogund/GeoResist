@@ -5,14 +5,29 @@ import (
 )
 
 func Migrate() {
+	// drop tables in correct order (respect foreign keys!)
+	drops := []string{
+		`DROP TABLE IF EXISTS measurements`,
+		`DROP TABLE IF EXISTS reports`,
+		`DROP TABLE IF EXISTS surveys`,
+		`DROP TABLE IF EXISTS users`,
+	}
+	for _, query := range drops {
+		_, err := DB.Exec(query)
+		if err != nil {
+			log.Fatal("Drop error:", err)
+		}
+	}
+
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS users (
-            id          SERIAL PRIMARY KEY,
-            name        VARCHAR(100) NOT NULL,
-            email       VARCHAR(100) UNIQUE NOT NULL,
-            password    VARCHAR(255) NOT NULL,
-            verified    BOOLEAN DEFAULT FALSE,
-            created_at  TIMESTAMP DEFAULT NOW()
+            id                  SERIAL PRIMARY KEY,
+            name                VARCHAR(100) NOT NULL,
+            email               VARCHAR(100) UNIQUE NOT NULL,
+            password            VARCHAR(255) NOT NULL,
+            verified            BOOLEAN DEFAULT FALSE,
+            verification_token  VARCHAR(64),      
+            created_at          TIMESTAMP DEFAULT NOW()
         )`,
 
 		`CREATE TABLE IF NOT EXISTS surveys (
@@ -23,6 +38,8 @@ func Migrate() {
             latitude        DECIMAL(10,8),
             longitude       DECIMAL(11,8),
             terrain_type    VARCHAR(20),
+            geologic_history  TEXT,
+            previous_wells    TEXT,
             date            DATE,
             status          VARCHAR(20) DEFAULT 'pending',
             created_at      TIMESTAMP DEFAULT NOW()
@@ -32,21 +49,14 @@ func Migrate() {
     		id                   SERIAL PRIMARY KEY,
     		survey_id            INTEGER REFERENCES surveys(id),
    			serial_number        INTEGER,
-<<<<<<< HEAD
-  			ab2              DECIMAL(10,4) NOT NULL,
-   			mn2              DECIMAL(10,4) NOT NULL,
-    		voltage              DECIMAL(10,4),    
-    		current              DECIMAL(10,4),    
-=======
   			ab2                  DECIMAL(10,4) NOT NULL,
    			mn2                  DECIMAL(10,4) NOT NULL,
     		voltage              DECIMAL(10,4),    
     		electric_current     DECIMAL(10,4),    
->>>>>>> fd65441d8ad80696c83d40a2f832db49b4ff283e
    			resistance           DECIMAL(10,4),    
     		geometric_factor     DECIMAL(10,4),    
     		apparent_resistivity DECIMAL(10,4)     
-)`,
+        )`,
 
 		`CREATE TABLE IF NOT EXISTS reports (
             id                  SERIAL PRIMARY KEY,

@@ -16,8 +16,8 @@ func CalculateRhoA(k, resistance float64) float64 {
 func ProcessMeasurement(m *models.Measurement) error {
 	// step 1 — calculate R if missing
 	if m.Resistance == 0 {
-		if m.Voltage != 0 && m.Current != 0 {
-			m.Resistance = m.Voltage / m.Current
+		if m.Voltage != 0 && m.ElectricCurrent != 0 {
+			m.Resistance = m.Voltage / m.ElectricCurrent
 		} else if m.ApparentResistivity == 0 {
 			return fmt.Errorf("insufficient data: need R or V and I")
 		}

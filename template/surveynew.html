@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Survey - GeoResist</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="container">
+
+    <div class="survey-card">
+
+        <h1>Create New Survey</h1>
+        <p>Upload and process a new resistivity survey.</p>
+
+        <form action="/survey/new" method="POST" enctype="multipart/form-data">
+
+            <!-- TITLE -->
+            <div class="form-group">
+                <label>Survey Title</label>
+                <input
+                    type="text"
+                    name="title"
+                    placeholder="e.g. Proposed Borehole Investigation"
+                    required
+                >
+            </div>
+
+            <!-- LOCATION -->
+            <div class="form-group">
+                <label>Location</label>
+                <input
+                    type="text"
+                    name="location"
+                    placeholder="Town, State"
+                    required
+                >
+            </div>
+
+            <!-- DATE -->
+            <div class="form-group">
+                <label>Survey Date</label>
+                <input
+                    type="date"
+                    name="survey_date"
+                    required
+                >
+            </div>
+
+            <!-- TERRAIN -->
+            <div class="form-group">
+                <label>Terrain Type</label>
+
+                <select name="terrain_type" required>
+                    <option value="">Select Terrain</option>
+                    <option value="basement">Basement Terrain</option>
+                    <option value="sedimentary">Sedimentary Terrain</option>
+                    <option value="transition">Transition Zone</option>
+                </select>
+            </div>
+
+            <!-- GEOLOGIC HISTORY -->
+            <div class="form-group">
+                <label>Geologic History / Reconnaissance Notes</label>
+
+                <textarea
+                    name="geologic_history"
+                    rows="6"
+                    placeholder="Describe outcrops, rocky terrain, fractures, nearby streams, local wells, basement exposures, clay zones, groundwater indicators, surface geology observations..."
+                ></textarea>
+            </div>
+
+            <!-- PREVIOUS WELLS -->
+            <div class="form-group">
+                <label>Previous Wells / Borehole Information</label>
+
+                <textarea
+                    name="previous_wells"
+                    rows="5"
+                    placeholder="Nearby borehole depths, failed wells, water yield, seasonal performance, known dry zones..."
+                ></textarea>
+            </div>
+
+            <!-- GPS -->
+            <div class="grid-2">
+
+                <div class="form-group">
+                    <label>Latitude</label>
+                    <input
+                        type="number"
+                        step="any"
+                        id="latitude"
+                        name="latitude"
+                        placeholder="e.g. 7.3775"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label>Longitude</label>
+                    <input
+                        type="number"
+                        step="any"
+                        id="longitude"
+                        name="longitude"
+                        placeholder="e.g. 3.9470"
+                    >
+                </div>
+
+            </div>
+
+            <!-- DETECT LOCATION -->
+            <div class="form-group">
+                <button
+                    type="button"
+                    class="btn-secondary"
+                    onclick="detectLocation()"
+                >
+                    Detect My Location
+                </button>
+            </div>
+
+            <!-- FILE -->
+            <div class="form-group">
+                <label>Upload Resistivity Data (CSV / Excel)</label>
+
+                <input
+                    type="file"
+                    name="survey_file"
+                    accept=".csv,.xlsx,.xls"
+                >
+            </div>
+            <!-- OPTIONAL MANUAL DATA ENTRY -->
+
+<div class="form-group">
+
+    <label>Manual Resistivity Data Entry (Optional)</label>
+
+    <p>
+        Enter one measurement per line:
+        <br>
+        Format:
+        AB/2,MN/2,R
+    </p>
+
+    <textarea
+        name="manual_data"
+        rows="10"
+        placeholder="1,0.5,120
+        2,0.5,135
+        3,0.5,140"
+    ></textarea>
+
+</div>
+
+            <!-- SUBMIT -->
+            <button type="submit" class="btn-primary">
+                Run Analysis
+            </button>
+
+        </form>
+
+    </div>
+
+</div>
+
+<script>
+function detectLocation() {
+
+    if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser.")
+        return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        function(position) {
+
+            document.getElementById("latitude").value = position.coords.latitude
+            document.getElementById("longitude").value = position.coords.longitude
+
+        },
+        function(error) {
+            alert("Unable to retrieve location.")
+        }
+    )
+}
+</script>
+
+</body>
+</html>
