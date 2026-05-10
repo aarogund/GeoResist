@@ -44,7 +44,7 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// real DB error
 		if err != sql.ErrNoRows {
-			http.Error(w, "database error", http.StatusInternalServerError)
+			http.Error(w, err.Error(), 500)
 			return
 		}
 		// 4. HASH PASSWORD

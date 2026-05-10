@@ -1,163 +1,353 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>New Survey - GeoResist</title>
 
-    <link rel="stylesheet" href="/static/style.css">
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Create Survey</title>
+
+    <link
+        rel="stylesheet"
+        href="/static/style.css"
+    >
+
+    <style>
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 1100px;
+            margin: 40px auto;
+        }
+
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        h1, h2 {
+            margin-bottom: 20px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px,1fr));
+            gap: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: bold;
+        }
+
+        input,
+        select,
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            min-height: 100px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        table th,
+        table td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: center;
+        }
+
+        table th {
+            background: #f0f0f0;
+        }
+
+        .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        .btn:hover {
+            background: #0056b3;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+    </style>
+
 </head>
+
 <body>
 
 <div class="container">
 
-    <div class="survey-card">
+    <div class="card">
 
         <h1>Create New Survey</h1>
-        <p>Upload and process a new resistivity survey.</p>
 
-        <form action="/survey/new" method="POST" enctype="multipart/form-data">
+        <form
+            action="/survey/new"
+            method="POST"
+            enctype="multipart/form-data"
+        >
 
-            <!-- TITLE -->
-            <div class="form-group">
-                <label>Survey Title</label>
-                <input
-                    type="text"
-                    name="title"
-                    placeholder="e.g. Proposed Borehole Investigation"
-                    required
-                >
+            <!-- ========================= -->
+            <!-- SURVEY DETAILS -->
+            <!-- ========================= -->
+
+            <h2>Survey Information</h2>
+
+            <div class="grid">
+
+                <div>
+                    <label>Title</label>
+
+                    <input
+                        type="text"
+                        name="title"
+                        required
+                    >
+                </div>
+
+                <div>
+                    <label>Location</label>
+
+                    <input
+                        type="text"
+                        name="location"
+                        placeholder="Town, State"
+                        required
+                    >
+                </div>
+
+                <div>
+                    <label>Latitude</label>
+
+                    <input
+                        type="number"
+                        step="any"
+                        name="latitude"
+                        id="latitude"
+                    >
+                </div>
+
+                <div>
+                    <label>Longitude</label>
+
+                    <input
+                        type="number"
+                        step="any"
+                        name="longitude"
+                        id="longitude"
+                    >
+                </div>
+            <button
+                type="button"
+                class="btn"
+                onclick="detectLocation()"
+            >
+                Detect My Location
+            </button>
+                <div>
+                    <label>Terrain Type</label>
+
+                    <select
+                        name="terrain_type"
+                        required
+                    >
+                        <option value="">
+                            Select Terrain
+                        </option>
+
+                        <option value="basement">
+                            Basement
+                        </option>
+
+                        <option value="sedimentary">
+                            Sedimentary
+                        </option>
+
+                        <option value="transition">
+                            Transition Zone
+                        </option>
+                    </select>
+                </div>
+
+                <div>
+                    <label>Survey Date</label>
+
+                    <input
+                        type="date"
+                        name="survey_date"
+                        required
+                    >
+                </div>
+
+                <div>
+                    <label>Input Data Type</label>
+
+                    <select
+                        name="input_type"
+                        id="inputType"
+                        onchange="changeInputMode()"
+                        required
+                    >
+
+                        <option value="">
+                            Select Input Type
+                        </option>
+
+                        <option value="voltage">
+                            Voltage / Current
+                        </option>
+
+                        <option value="resistance">
+                            Resistance
+                        </option>
+
+                        <option value="resistivity">
+                            Apparent Resistivity
+                        </option>
+
+                        <option value="mixed">
+                            Mixed / Partial
+                        </option>
+
+                    </select>
+                </div>
+
             </div>
 
-            <!-- LOCATION -->
-            <div class="form-group">
-                <label>Location</label>
-                <input
-                    type="text"
-                    name="location"
-                    placeholder="Town, State"
-                    required
-                >
-            </div>
+            <br><br>
 
-            <!-- DATE -->
-            <div class="form-group">
-                <label>Survey Date</label>
-                <input
-                    type="date"
-                    name="survey_date"
-                    required
-                >
-            </div>
-
-            <!-- TERRAIN -->
-            <div class="form-group">
-                <label>Terrain Type</label>
-
-                <select name="terrain_type" required>
-                    <option value="">Select Terrain</option>
-                    <option value="basement">Basement Terrain</option>
-                    <option value="sedimentary">Sedimentary Terrain</option>
-                    <option value="transition">Transition Zone</option>
-                </select>
-            </div>
-
-            <!-- GEOLOGIC HISTORY -->
-            <div class="form-group">
-                <label>Geologic History / Reconnaissance Notes</label>
+            <div>
+                <label>Geologic History</label>
 
                 <textarea
                     name="geologic_history"
-                    rows="6"
-                    placeholder="Describe outcrops, rocky terrain, fractures, nearby streams, local wells, basement exposures, clay zones, groundwater indicators, surface geology observations..."
+                    placeholder="Describe local geology, nearby outcrops, fractures, weathering profile, aquifer indications, lithology..."
                 ></textarea>
             </div>
 
-            <!-- PREVIOUS WELLS -->
-            <div class="form-group">
-                <label>Previous Wells / Borehole Information</label>
+            <br>
+
+            <div>
+                <label>Previous Wells</label>
 
                 <textarea
                     name="previous_wells"
-                    rows="5"
-                    placeholder="Nearby borehole depths, failed wells, water yield, seasonal performance, known dry zones..."
+                    placeholder="Nearby boreholes, depths, yields, failures, casing details..."
                 ></textarea>
             </div>
+            <h2>Data Input (Optional CSV)</h2>
 
-            <!-- GPS -->
-            <div class="grid-2">
+<input
+    type="file"
+    name="survey_file"
+    accept=".csv"
+/>
 
-                <div class="form-group">
-                    <label>Latitude</label>
-                    <input
-                        type="number"
-                        step="any"
-                        id="latitude"
-                        name="latitude"
-                        placeholder="e.g. 7.3775"
-                    >
-                </div>
+<p style="color: gray;">
+    Or fill the table below manually
+</p>
 
-                <div class="form-group">
-                    <label>Longitude</label>
-                    <input
-                        type="number"
-                        step="any"
-                        id="longitude"
-                        name="longitude"
-                        placeholder="e.g. 3.9470"
-                    >
-                </div>
+            <!-- ========================= -->
+            <!-- MEASUREMENTS -->
+            <!-- ========================= -->
 
-            </div>
+            <h3>VES Measurements</h3>
 
-            <!-- DETECT LOCATION -->
-            <div class="form-group">
-                <button
-                    type="button"
-                    class="btn-secondary"
-                    onclick="detectLocation()"
-                >
-                    Detect My Location
-                </button>
-            </div>
+            <table id="measurementTable">
 
-            <!-- FILE -->
-            <div class="form-group">
-                <label>Upload Resistivity Data (CSV / Excel)</label>
+                <thead>
 
-                <input
-                    type="file"
-                    name="survey_file"
-                    accept=".csv,.xlsx,.xls"
-                >
-            </div>
-            <!-- OPTIONAL MANUAL DATA ENTRY -->
+                    <tr>
 
-<div class="form-group">
+                        <th>AB/2</th>
 
-    <label>Manual Resistivity Data Entry (Optional)</label>
+                        <th>MN/2</th>
 
-    <p>
-        Enter one measurement per line:
-        <br>
-        Format:
-        AB/2,MN/2,R
-    </p>
+                        <th
+                            class="voltage-field hidden"
+                        >
+                            V_change
+                        </th>
 
-    <textarea
-        name="manual_data"
-        rows="10"
-        placeholder="1,0.5,120
-        2,0.5,135
-        3,0.5,140"
-    ></textarea>
+                        <th
+                            class="voltage-field hidden"
+                        >
+                            Current (I)
+                        </th>
 
-</div>
+                        <th
+                            class="resistance-field hidden"
+                        >
+                            Resistance (R)
+                        </th>
 
-            <!-- SUBMIT -->
-            <button type="submit" class="btn-primary">
-                Run Analysis
+                        <th
+                            class="resistivity-field hidden"
+                        >
+                            Apparent Resistivity (ρa)
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody id="measurementBody">
+
+                    <!-- ROWS INSERTED BY JS -->
+
+                </tbody>
+
+            </table>
+
+            <button
+                type="button"
+                class="btn"
+                onclick="addRow()"
+            >
+                Add Measurement
+            </button>
+
+            <br><br>
+
+            <button
+                type="submit"
+                class="btn"
+            >
+                Save Survey
             </button>
 
         </form>
@@ -167,25 +357,209 @@
 </div>
 
 <script>
+
 function detectLocation() {
 
     if (!navigator.geolocation) {
-        alert("Geolocation is not supported by your browser.")
+
+        alert(
+            "Geolocation not supported."
+        )
+
         return
     }
 
     navigator.geolocation.getCurrentPosition(
+
         function(position) {
 
-            document.getElementById("latitude").value = position.coords.latitude
-            document.getElementById("longitude").value = position.coords.longitude
+            document.getElementById(
+                "latitude"
+            ).value =
+                position.coords.latitude
 
+            document.getElementById(
+                "longitude"
+            ).value =
+                position.coords.longitude
         },
-        function(error) {
-            alert("Unable to retrieve location.")
+
+        function() {
+
+            alert(
+                "Failed to get location."
+            )
         }
     )
 }
+
+// =========================
+// ADD TABLE ROW
+// =========================
+
+function addRow() {
+
+    const tbody =
+        document.getElementById(
+            "measurementBody"
+        )
+
+    const row =
+        document.createElement("tr")
+
+    row.innerHTML = `
+
+        <td>
+            <input
+                type="number"
+                step="any"
+                name="ab2[]"
+                required
+            >
+        </td>
+
+        <td>
+            <input
+                type="number"
+                step="any"
+                name="mn2[]"
+                required
+            >
+        </td>
+
+        <td class="voltage-field hidden">
+            <input
+                type="number"
+                step="any"
+                name="v_change"
+            >
+        </td>
+
+        <td class="voltage-field hidden">
+            <input
+                type="number"
+                step="any"
+                name="current[]"
+            >
+        </td>
+
+        <td class="resistance-field hidden">
+            <input
+                type="number"
+                step="any"
+                name="resistance[]"
+            >
+        </td>
+
+        <td class="resistivity-field hidden">
+            <input
+                type="number"
+                step="any"
+                name="apparent_resistivity[]"
+            >
+        </td>
+
+    `
+
+    tbody.appendChild(row)
+
+    changeInputMode()
+}
+
+// =========================
+// CHANGE INPUT MODE
+// =========================
+
+function changeInputMode() {
+
+    const mode =
+        document.getElementById(
+            "inputType"
+        ).value
+
+    // hide all
+    document.querySelectorAll(
+        ".voltage-field"
+    ).forEach(el => {
+        el.classList.add("hidden")
+    })
+
+    document.querySelectorAll(
+        ".resistance-field"
+    ).forEach(el => {
+        el.classList.add("hidden")
+    })
+
+    document.querySelectorAll(
+        ".resistivity-field"
+    ).forEach(el => {
+        el.classList.add("hidden")
+    })
+
+    // voltage mode
+    if (
+        mode === "voltage"
+    ) {
+
+        document.querySelectorAll(
+            ".voltage-field"
+        ).forEach(el => {
+            el.classList.remove("hidden")
+        })
+    }
+
+    // resistance mode
+    else if (
+        mode === "resistance"
+    ) {
+
+        document.querySelectorAll(
+            ".resistance-field"
+        ).forEach(el => {
+            el.classList.remove("hidden")
+        })
+    }
+
+    // resistivity mode
+    else if (
+        mode === "resistivity"
+    ) {
+
+        document.querySelectorAll(
+            ".resistivity-field"
+        ).forEach(el => {
+            el.classList.remove("hidden")
+        })
+    }
+
+    // mixed mode
+    else if (
+        mode === "mixed"
+    ) {
+
+        document.querySelectorAll(
+            ".voltage-field"
+        ).forEach(el => {
+            el.classList.remove("hidden")
+        })
+
+        document.querySelectorAll(
+            ".resistance-field"
+        ).forEach(el => {
+            el.classList.remove("hidden")
+        })
+
+        document.querySelectorAll(
+            ".resistivity-field"
+        ).forEach(el => {
+            el.classList.remove("hidden")
+        })
+    }
+}
+
+// create first row automatically
+addRow()
+
 </script>
 
 </body>

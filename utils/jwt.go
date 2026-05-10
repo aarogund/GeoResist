@@ -9,7 +9,7 @@ import (
 )
 
 type Claims struct {
-	UserID int `json:"user_id"`
+	UserID float64 `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
@@ -34,9 +34,12 @@ func VerifyToken(tokenStr string) (*Claims, error) {
 
 func GenerateToken(userID int) (string, error) {
 	secret := os.Getenv("JWT_SECRET")
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": userID,
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
+		UserID: float64(userID),
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+		},
 	})
 	return token.SignedString([]byte(secret))
 }

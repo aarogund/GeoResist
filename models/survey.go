@@ -12,6 +12,7 @@ type Survey struct {
 	TerrainType     string
 	GeologicHistory string
 	PreviousWells   string
+	InputType       string
 	Date            time.Time
 	Status          string
 	CreatedAt       time.Time

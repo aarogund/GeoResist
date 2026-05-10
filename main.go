@@ -15,8 +15,16 @@ import (
 func main() {
 	godotenv.Load()
 	database.Connect()
-	database.Migrate()
+	if os.Getenv("RUN_MIGRATION") == "true" {
+		database.Migrate()
+	}
 	r := mux.NewRouter()
+	r.PathPrefix("/static/").Handler(
+		http.StripPrefix(
+			"/static/",
+			http.FileServer(http.Dir("./static")),
+		),
+	)
 
 	// PUBLIC routes - no auth needed
 	r.HandleFunc("/register", handlers.RegisterHandler).Methods("GET", "POST")
@@ -40,7 +48,6 @@ func main() {
 	protected.HandleFunc("/report/{id}/share", handlers.ReportShareHandler).Methods("GET")
 	protected.HandleFunc("/api/survey/{id}/curve", handlers.ApiSurveyIdHandler).Methods("GET")
 	protected.HandleFunc("/api/survey/{id}/layers", handlers.ApiSurveyLayersHandler).Methods("GET")
-	protected.HandleFunc("/survey/new", handlers.SurveyNewHandler).Methods("GET", "POST")
 
 	port := os.Getenv("PORT")
 	if port == "" {

@@ -1,0 +1,320 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Survey Results</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="survey-card">
+
+        <h1>{{.Survey.Title}}</h1>
+
+        <div class="info-grid">
+
+            <div>
+                <strong>Location:</strong>
+                {{.Survey.Location}}
+            </div>
+
+            <div>
+                <strong>Terrain:</strong>
+                {{.Survey.TerrainType}}
+            </div>
+
+            <div>
+                <strong>Date:</strong>
+                {{.Survey.Date.Format "2006-01-02"}}
+            </div>
+
+            <div>
+                <strong>Coordinates:</strong>
+                {{.Survey.Latitude}},
+                {{.Survey.Longitude}}
+            </div>
+
+        </div>
+
+        <hr>
+
+        <h2>Geologic History</h2>
+
+        <p>
+            {{.Survey.GeologicHistory}}
+        </p>
+
+        <h2>Previous Wells</h2>
+
+        <p>
+            {{.Survey.PreviousWells}}
+        </p>
+
+        <hr>
+
+        <h2>VES Data</h2>
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>AB/2</th>
+                    <th>MN/2</th>
+                    <th>R</th>
+                    <th>ρa</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+                {{range .Measurements}}
+
+                <tr>
+                    <td>{{.AB2}}</td>
+                    <td>{{.MN2}}</td>
+                    <td>{{.Resistance}}</td>
+                    <td>{{.ApparentResistivity}}</td>
+                </tr>
+
+                {{end}}
+
+            </tbody>
+
+        </table>
+
+        <hr>
+
+        <h2>VES Curve</h2>
+
+        <div
+            id="vesCurve"
+            style="height: 500px;"
+        ></div>
+
+    </div>
+
+</div>
+
+<script id="graph-data" type="application/json">
+{
+    "ab2":  ab2Values,
+	"rhoa": rhoaValues,
+}
+</script>
+
+<!-- Store graph data safely -->
+<script
+    id="graph-data"
+    type="application/json"
+>
+{{.GraphJSON}}
+</script>
+
+<script>
+
+document.addEventListener("DOMContentLoaded", function () {
+
+    // Get raw JSON text
+    const raw =
+        document.getElementById("graph-data").textContent
+
+    // Convert JSON text to object
+    const data = JSON.parse(raw)
+
+    console.log(data)
+
+    // Plot trace
+    const trace = {
+
+        x: data.ab2,
+
+        y: data.rhoa,
+
+        mode: "lines+markers",
+
+        type: "scatter",
+
+        marker: {
+            size: 8
+        }
+    }
+
+    // Graph layout
+    const layout = {
+
+        title: "Vertical Electrical Sounding Curve",
+
+        xaxis: {
+            title: "AB/2",
+            type: "log"
+        },
+
+        yaxis: {
+            title: "Apparent Resistivity (ρa)",
+            type: "log"
+        }
+    }
+
+    // Render graph
+    Plotly.newPlot(
+        "vesCurve",
+        [trace],
+        layout
+    )
+})
+
+</script>
+</body>
+</html> -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Survey Results</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+</head>
+
+<body>
+
+<div class="container">
+    <div class="survey-card">
+
+        <h1>{{.Survey.Title}}</h1>
+
+        <div class="info-grid">
+            <div>
+                <strong>Location:</strong>
+                {{.Survey.Location}}
+            </div>
+            <div>
+                <strong>Terrain:</strong>
+                {{.Survey.TerrainType}}
+            </div>
+            <div>
+                <strong>Date:</strong>
+                {{.Survey.Date.Format "2006-01-02"}}
+            </div>
+            <div>
+                <strong>Coordinates:</strong>
+                {{.Survey.Latitude}},
+                {{.Survey.Longitude}}
+            </div>
+        </div>
+
+        <hr>
+
+        <h2>Geologic History</h2>
+        <p>{{.Survey.GeologicHistory}}</p>
+
+        <h2>Previous Wells</h2>
+        <p>{{.Survey.PreviousWells}}</p>
+
+        <hr>
+
+        <h2>VES Data</h2>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>AB/2 (m)</th>
+                    <th>MN/2 (m)</th>
+                    <th>R (Ω)</th>
+                    <th>ρa (Ω·m)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Measurements}}
+                <tr>
+                    <td>{{.AB2}}</td>
+                    <td>{{.MN2}}</td>
+                    <td>{{.Resistance}}</td>
+                    <td>{{printf "%.2f" .ApparentResistivity}}</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+
+        <hr>
+
+        <h2>VES Curve</h2>
+        <div id="vesCurve" style="height: 500px;"></div>
+
+        <hr>
+
+        <div class="actions">
+            <a href="/survey/{{.Survey.ID}}/edit">
+                <button class="btn-secondary">Edit Interpretation</button>
+            </a>
+            <a href="/report/{{.Survey.ID}}/new">
+                <button class="btn-primary">Generate Report</button>
+            </a>
+        </div>
+
+    </div>
+</div>
+
+<!-- Store graph data safely -->
+<script id="graph-data" type="application/json">
+{{.GraphJSON}}
+</script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const raw = document.getElementById("graph-data").textContent
+    const data = JSON.parse(raw)
+
+    console.log("Graph data:", data)
+
+    const trace = {
+        x: data.ab2,
+        y: data.rhoa,
+        mode: "lines+markers",
+        type: "scatter",
+        name: "VES Curve",
+        line: {color: "#b65a3c"},
+        marker: {
+            size: 8,
+            color: "#b65a3c"
+        }
+    }
+
+    const layout = {
+        title: "Vertical Electrical Sounding Curve",
+        xaxis: {
+            title: "AB/2 (m)",
+            type: "log",
+            showgrid: true,
+            gridcolor: "#eee"
+        },
+        yaxis: {
+            title: "Apparent Resistivity ρa (Ω·m)",
+            type: "log",
+            showgrid: true,
+            gridcolor: "#eee"
+        },
+        plot_bgcolor: "#FDF6EC",
+        paper_bgcolor: "#FDF6EC"
+    }
+
+    Plotly.newPlot("vesCurve", [trace], layout)
+})
+</script>
+
+</body>
+</html>
