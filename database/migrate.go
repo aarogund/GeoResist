@@ -10,7 +10,11 @@ func Migrate() {
             id          SERIAL PRIMARY KEY,
             name        VARCHAR(100) NOT NULL,
             email       VARCHAR(100) UNIQUE NOT NULL,
-            password    VARCHAR(255) NOT NULL,
+            password_hash TEXT,
+		    email_verified BOOLEAN DEFAULT FALSE,
+		    verification_token TEXT,
+		    reset_token TEXT,
+		    reset_token_expiry TIMESTAMP
             verified    BOOLEAN DEFAULT FALSE,
             created_at  TIMESTAMP DEFAULT NOW()
         )`,
@@ -19,10 +23,10 @@ func Migrate() {
             id              SERIAL PRIMARY KEY,
             user_id         INTEGER REFERENCES users(id),
             title           VARCHAR(200) NOT NULL,
-            location        VARCHAR(200),
+            location        VARCHAR(200), NOT NULL
             latitude        DECIMAL(10,8),
             longitude       DECIMAL(11,8),
-            terrain_type    VARCHAR(20),
+            terrain_type    VARCHAR(20), NOT NULL
             date            DATE,
             status          VARCHAR(20) DEFAULT 'pending',
             created_at      TIMESTAMP DEFAULT NOW()
@@ -33,7 +37,7 @@ func Migrate() {
     		survey_id            INTEGER REFERENCES surveys(id),
    			serial_number        INTEGER,
   			ab2                  DECIMAL(10,4) NOT NULL,
-   			mn2                  DECIMAL(10,4) NOT NULL,
+   			mn2                  DECIMAL(10,4),
     		voltage              DECIMAL(10,4),    
     		electric_current     DECIMAL(10,4),    
    			resistance           DECIMAL(10,4),    
