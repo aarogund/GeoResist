@@ -57,6 +57,18 @@ func Migrate() {
     		geometric_factor     DECIMAL(10,4),    
     		apparent_resistivity DECIMAL(10,4)     
         )`,
+		`CREATE TABLE IF NOT EXISTS layers (
+             id              SERIAL PRIMARY KEY,
+             survey_id       INTEGER REFERENCES surveys(id),
+             layer_number    INTEGER,
+             depth_from      DECIMAL(10,2),
+             depth_to        DECIMAL(10,2),
+             resistivity     DECIMAL(15,4),
+             lithology       VARCHAR(200),
+             interpretation  TEXT,
+             is_aquifer      BOOLEAN DEFAULT FALSE,
+             created_at      TIMESTAMP DEFAULT NOW()
+        )`,
 
 		`CREATE TABLE IF NOT EXISTS reports (
             id                  SERIAL PRIMARY KEY,
