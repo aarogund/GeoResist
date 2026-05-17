@@ -143,12 +143,7 @@ func SurveyNewHandler(w http.ResponseWriter, r *http.Request) {
 	// =========================
 	// MEASUREMENT STORAGE
 	// =========================
-	// =========================
-	// MEASUREMENT STORAGE
-	// =========================
-	// =========================
-	// MEASUREMENT STORAGE
-	// =========================
+
 	var measurements []models.Measurement
 
 	// =========================
@@ -555,14 +550,42 @@ func SurveyNewHandler(w http.ResponseWriter, r *http.Request) {
 
 			measurements = append(measurements, m)
 		}
-		http.Redirect(
-			w,
-			r,
-			"/survey/"+strconv.Itoa(surveyID)+"/results",
-			http.StatusSeeOther,
-		)
+		// SAVE ALL MEASUREMENTS TO DATABASE
+fmt.Println("Total measurements to save:", len(measurements))
 
-		return
+for _, m := range measurements {
+    _, err = database.DB.Exec(`
+        INSERT INTO measurements (
+            survey_id,
+            ab2,
+            mn2,
+            resistance,
+            apparent_resistivity
+        )
+        VALUES ($1,$2,$3,$4,$5)
+    `,
+        surveyID,
+        m.AB2,
+        m.MN2,
+        m.Resistance,
+        m.ApparentResistivity,
+    )
+    if err != nil {
+        fmt.Println("Measurement insert error:", err)
+        http.Error(w, "failed to save measurements", http.StatusInternalServerError)
+        return
+    }
+}
+
+// REDIRECT AFTER SAVING
+http.Redirect(
+    w,
+    r,
+    "/survey/"+strconv.Itoa(surveyID)+"/results",
+    http.StatusSeeOther,
+)
+return
+		
 	}
 }
 
