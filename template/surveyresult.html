@@ -1,183 +1,3 @@
-<!-- <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-    <title>Survey Results</title>
-
-    <link rel="stylesheet" href="/static/style.css">
-
-    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-</head>
-
-<body>
-
-<div class="container">
-
-    <div class="survey-card">
-
-        <h1>{{.Survey.Title}}</h1>
-
-        <div class="info-grid">
-
-            <div>
-                <strong>Location:</strong>
-                {{.Survey.Location}}
-            </div>
-
-            <div>
-                <strong>Terrain:</strong>
-                {{.Survey.TerrainType}}
-            </div>
-
-            <div>
-                <strong>Date:</strong>
-                {{.Survey.Date.Format "2006-01-02"}}
-            </div>
-
-            <div>
-                <strong>Coordinates:</strong>
-                {{.Survey.Latitude}},
-                {{.Survey.Longitude}}
-            </div>
-
-        </div>
-
-        <hr>
-
-        <h2>Geologic History</h2>
-
-        <p>
-            {{.Survey.GeologicHistory}}
-        </p>
-
-        <h2>Previous Wells</h2>
-
-        <p>
-            {{.Survey.PreviousWells}}
-        </p>
-
-        <hr>
-
-        <h2>VES Data</h2>
-
-        <table>
-
-            <thead>
-                <tr>
-                    <th>AB/2</th>
-                    <th>MN/2</th>
-                    <th>R</th>
-                    <th>ρa</th>
-                </tr>
-            </thead>
-
-            <tbody>
-
-                {{range .Measurements}}
-
-                <tr>
-                    <td>{{.AB2}}</td>
-                    <td>{{.MN2}}</td>
-                    <td>{{.Resistance}}</td>
-                    <td>{{.ApparentResistivity}}</td>
-                </tr>
-
-                {{end}}
-
-            </tbody>
-
-        </table>
-
-        <hr>
-
-        <h2>VES Curve</h2>
-
-        <div
-            id="vesCurve"
-            style="height: 500px;"
-        ></div>
-
-    </div>
-
-</div>
-
-<script id="graph-data" type="application/json">
-{
-    "ab2":  ab2Values,
-	"rhoa": rhoaValues,
-}
-</script>
-
-<!-- Store graph data safely -->
-<script
-    id="graph-data"
-    type="application/json"
->
-{{.GraphJSON}}
-</script>
-
-<script>
-
-document.addEventListener("DOMContentLoaded", function () {
-
-    // Get raw JSON text
-    const raw =
-        document.getElementById("graph-data").textContent
-
-    // Convert JSON text to object
-    const data = JSON.parse(raw)
-
-    console.log(data)
-
-    // Plot trace
-    const trace = {
-
-        x: data.ab2,
-
-        y: data.rhoa,
-
-        mode: "lines+markers",
-
-        type: "scatter",
-
-        marker: {
-            size: 8
-        }
-    }
-
-    // Graph layout
-    const layout = {
-
-        title: "Vertical Electrical Sounding Curve",
-
-        xaxis: {
-            title: "AB/2",
-            type: "log"
-        },
-
-        yaxis: {
-            title: "Apparent Resistivity (ρa)",
-            type: "log"
-        }
-    }
-
-    // Render graph
-    Plotly.newPlot(
-        "vesCurve",
-        [trace],
-        layout
-    )
-})
-
-</script>
-</body>
-</html> -->
 
 <!DOCTYPE html>
 <html lang="en">
@@ -185,12 +5,65 @@ document.addEventListener("DOMContentLoaded", function () {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Survey Results</title>
+
     <link rel="stylesheet" href="/static/style.css">
-    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+
+    <!-- Load Plotly only once -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+    <style>
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 750px;
+            height: 750px;
+            margin: 0 auto 30px;
+            overflow: visible;
+        }
+
+        #vesCurve {
+            width: 100%;
+            height: 100%;
+        }
+
+        .actions {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin: 20px auto 30px;
+            padding: 20px 0;
+        }
+
+        .actions a {
+            position: relative;
+            z-index: 11;
+            text-decoration: none;
+        }
+
+        .actions button {
+            cursor: pointer;
+        }
+
+        .chart-error {
+            max-width: 750px;
+            margin: 15px auto;
+            color: #b42318;
+            text-align: center;
+        }
+
+        @media (max-width: 600px) {
+            .chart-container {
+                height: 500px;
+            }
+        }
+    </style>
 </head>
 
 <body>
-
 <div class="container">
     <div class="survey-card">
 
@@ -201,14 +74,17 @@ document.addEventListener("DOMContentLoaded", function () {
                 <strong>Location:</strong>
                 {{.Survey.Location}}
             </div>
+
             <div>
                 <strong>Terrain:</strong>
                 {{.Survey.TerrainType}}
             </div>
+
             <div>
                 <strong>Date:</strong>
                 {{.Survey.Date.Format "2006-01-02"}}
             </div>
+
             <div>
                 <strong>Coordinates:</strong>
                 {{.Survey.Latitude}},
@@ -237,6 +113,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     <th>ρa (Ω·m)</th>
                 </tr>
             </thead>
+
             <tbody>
                 {{range .Measurements}}
                 <tr>
@@ -252,69 +129,371 @@ document.addEventListener("DOMContentLoaded", function () {
         <hr>
 
         <h2>VES Curve</h2>
-        <div id="vesCurve" style="height: 500px;"></div>
+
+        <div class="chart-container">
+            <div id="vesCurve"></div>
+        </div>
+
+        <p id="graphError" class="chart-error" hidden></p>
 
         <hr>
 
         <div class="actions">
-            <a href="/survey/{{.Survey.ID}}/edit">
-                <button class="btn-secondary">Edit Interpretation</button>
+            <a href="/survey/{{.Survey.ID}}/edit"
+               class="btn-secondary">
+                Edit Interpretation
             </a>
-            <a href="/report/{{.Survey.ID}}/new">
-                <button class="btn-primary">Generate Report</button>
+
+            <a href="/report/{{.Survey.ID}}/new"
+               class="btn-primary">
+                Generate Report
             </a>
         </div>
 
     </div>
 </div>
 
-<!-- Store graph data safely -->
-<script id="graph-data" type="application/json">
-{{.GraphJSON}}
-</script>
+<!--
+    The Go handler must populate .GraphJSON with valid JSON
+    containing ab2, rhoa, and computed arrays.
+-->
+<script id="graph-data" type="application/json">{{.GraphJSON}}</script>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
+    const graphElement = document.getElementById("vesCurve");
+    const errorElement = document.getElementById("graphError");
+    const dataElement = document.getElementById("graph-data");
 
-    const raw = document.getElementById("graph-data").textContent
-    const data = JSON.parse(raw)
+    function showError(message) {
+        errorElement.textContent = message;
+        errorElement.hidden = false;
+        console.error(message);
+    }
 
-    console.log("Graph data:", data)
+    if (typeof Plotly === "undefined") {
+        showError("The plotting library could not be loaded. Check your internet connection.");
+        return;
+    }
 
-    const trace = {
-        x: data.ab2,
-        y: data.rhoa,
-        mode: "lines+markers",
-        type: "scatter",
-        name: "VES Curve",
-        line: {color: "#b65a3c"},
-        marker: {
-            size: 8,
-            color: "#b65a3c"
+    if (!dataElement) {
+        showError("Graph data was not found in the page.");
+        return;
+    }
+
+    let data;
+
+    try {
+        data = JSON.parse(dataElement.textContent);
+    } catch (error) {
+        showError("The graph data is invalid JSON. Check GraphJSON in the Go handler.");
+        console.error(error);
+        return;
+    }
+
+    console.log("VES graph data:", data);
+
+    // Validate the observed measurements.
+    if (
+        !data ||
+        !Array.isArray(data.ab2) ||
+        !Array.isArray(data.rhoa) ||
+        data.ab2.length === 0 ||
+        data.ab2.length !== data.rhoa.length
+    ) {
+        showError("No valid observed VES measurements are available to plot.");
+        return;
+    }
+
+    // Keep only positive, finite AB/2 and apparent-resistivity pairs.
+    // Logarithmic axes cannot display zero or negative values.
+    const observed = data.ab2
+        .map(function (ab2, index) {
+            return {
+                ab2: Number(ab2),
+                rhoa: Number(data.rhoa[index])
+            };
+        })
+        .filter(function (point) {
+            return Number.isFinite(point.ab2) &&
+                   Number.isFinite(point.rhoa) &&
+                   point.ab2 > 0 &&
+                   point.rhoa > 0;
+        })
+        .sort(function (a, b) {
+            return a.ab2 - b.ab2;
+        });
+
+    if (observed.length === 0) {
+        showError("No positive, finite measurements are available for logarithmic plotting.");
+        return;
+    }
+
+    const observedAB2 = observed.map(function (point) {
+        return point.ab2;
+    });
+
+    const observedRhoa = observed.map(function (point) {
+        return point.rhoa;
+    });
+
+    // Observed measurements: plot symbols without smoothing.
+    const traces = [
+        {
+            x: observedAB2,
+            y: observedRhoa,
+            type: "scatter",
+            mode: "markers",
+            name: "Observed",
+            marker: {
+                size: 7,
+                color: "#000000",
+                symbol: "circle-open",
+                line: {
+                    color: "#000000",
+                    width: 1.2
+                }
+            },
+            hovertemplate:
+                "AB/2: %{x:.3g} m<br>" +
+                "Observed ρa: %{y:.3g} Ω·m" +
+                "<extra></extra>"
         }
+    ];
+
+    // Computed model curve: add only if the handler supplied
+    // a usable computed array aligned with the original AB/2 data.
+    if (
+        Array.isArray(data.computed) &&
+        data.computed.length === data.ab2.length
+    ) {
+        const computed = data.ab2
+            .map(function (ab2, index) {
+                return {
+                    ab2: Number(ab2),
+                    rhoa: Number(data.computed[index])
+                };
+            })
+            .filter(function (point) {
+                return Number.isFinite(point.ab2) &&
+                       Number.isFinite(point.rhoa) &&
+                       point.ab2 > 0 &&
+                       point.rhoa > 0;
+            })
+            .sort(function (a, b) {
+                return a.ab2 - b.ab2;
+            });
+
+        if (computed.length > 0) {
+            traces.push({
+                x: computed.map(function (point) {
+                    return point.ab2;
+                }),
+                y: computed.map(function (point) {
+                    return point.rhoa;
+                }),
+                type: "scatter",
+                mode: "lines",
+                name: "Fitted model",
+                line: {
+                    color: "#d9482b",
+                    width: 2
+                },
+                connectgaps: false,
+                hovertemplate:
+                    "AB/2: %{x:.3g} m<br>" +
+                    "Model ρa: %{y:.3g} Ω·m" +
+                    "<extra></extra>"
+            });
+        }
+    } else {
+        console.warn(
+            "Computed curve unavailable or mismatched. " +
+            "Showing observed measurements only."
+        );
+    }
+
+    // Generate minor logarithmic grid lines.
+    // On logarithmic axes, shape coordinates referenced to
+    // the data axes use log10-transformed coordinates.
+    function generateLogGrid() {
+        const shapes = [];
+
+        // X-axis minor grid: 1–10, 10–100, 100–1000.
+        for (let decade = 0; decade < 3; decade++) {
+            const base = Math.pow(10, decade);
+
+            for (let i = 2; i < 10; i++) {
+                const value = i * base;
+
+                shapes.push({
+                    type: "line",
+                    xref: "x",
+                    yref: "paper",
+                    x0: Math.log10(value),
+                    x1: Math.log10(value),
+                    y0: 0,
+                    y1: 1,
+                    line: {
+                        color: "#d9d9d9",
+                        width: 0.5
+                    },
+                    layer: "below"
+                });
+            }
+        }
+
+        // Y-axis minor grid: 1–10, 10–100, ... 1000–10000.
+        for (let decade = 0; decade < 4; decade++) {
+            const base = Math.pow(10, decade);
+
+            for (let i = 2; i < 10; i++) {
+                const value = i * base;
+
+                shapes.push({
+                    type: "line",
+                    xref: "paper",
+                    yref: "y",
+                    x0: 0,
+                    x1: 1,
+                    y0: Math.log10(value),
+                    y1: Math.log10(value),
+                    line: {
+                        color: "#d9d9d9",
+                        width: 0.5
+                    },
+                    layer: "below"
+                });
+            }
+        }
+
+        return shapes;
     }
 
     const layout = {
-        title: "Vertical Electrical Sounding Curve",
-        xaxis: {
-            title: "AB/2 (m)",
-            type: "log",
-            range: [0, 2], 
-            showgrid: true,
-            gridcolor: "#eee"
+        title: {
+            text: "Vertical Electrical Sounding Curve",
+            font: {
+                family: "Times New Roman",
+                size: 24
+            }
         },
-        yaxis: {
-            title: "Apparent Resistivity ρa (Ω·m)",
-            type: "log",
-            showgrid: true,
-            gridcolor: "#eee"
-        },
-        plot_bgcolor: "#FDF6EC",
-        paper_bgcolor: "#FDF6EC"
-    }
 
-    Plotly.newPlot("vesCurve", [trace], layout)
-})
+        autosize: true,
+        height: 750,
+
+        paper_bgcolor: "#ffffff",
+        plot_bgcolor: "#ffffff",
+
+        margin: {
+            l: 100,
+            r: 40,
+            t: 90,
+            b: 95
+        },
+
+        showlegend: true,
+
+        legend: {
+            x: 0.98,
+            y: 1.12,
+            xanchor: "right",
+            yanchor: "top",
+            bgcolor: "rgba(255,255,255,0.8)"
+        },
+
+        shapes: generateLogGrid(),
+
+        // AB/2 axis.
+        xaxis: {
+            title: {
+                text: "AB/2 (m)",
+                font: {
+                    size: 22,
+                    family: "Times New Roman"
+                }
+            },
+
+            type: "log",
+            range: [0, 3],
+            autorange: false,
+
+            tickmode: "array",
+            tickvals: [1, 10, 100, 1000],
+            ticktext: ["1", "10", "100", "1000"],
+
+            ticks: "outside",
+            ticklen: 8,
+            tickwidth: 1,
+            tickfont: {
+                size: 16
+            },
+
+            showgrid: true,
+            gridcolor: "#666666",
+            gridwidth: 1,
+
+            zeroline: false,
+            mirror: true,
+            linecolor: "#000000",
+            linewidth: 1.5
+        },
+
+        // Apparent-resistivity axis.
+        yaxis: {
+            title: {
+                text: "Apparent Resistivity (Ω·m)",
+                font: {
+                    size: 22,
+                    family: "Times New Roman"
+                }
+            },
+
+            type: "log",
+            range: [0, 4],
+            autorange: false,
+
+            tickmode: "array",
+            tickvals: [1, 10, 100, 1000, 10000],
+            ticktext: ["1", "10", "100", "1000", "10000"],
+
+            ticks: "outside",
+            ticklen: 8,
+            tickwidth: 1,
+            tickfont: {
+                size: 16
+            },
+
+            showgrid: true,
+            gridcolor: "#666666",
+            gridwidth: 1,
+
+            zeroline: false,
+            mirror: true,
+            linecolor: "#000000",
+            linewidth: 1.5
+        }
+    };
+
+    const config = {
+        responsive: true,
+        displaylogo: false,
+        modeBarButtonsToRemove: [
+            "lasso2d",
+            "select2d"
+        ]
+    };
+
+    Plotly.newPlot(
+        graphElement,
+        traces,
+        layout,
+        config
+    ).catch(function (error) {
+        showError("The VES graph could not be rendered.");
+        console.error("Plotly rendering error:", error);
+    });
+});
 </script>
 
 </body>

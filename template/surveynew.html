@@ -1,90 +1,65 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-
     <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Create Survey</title>
-
-    <link
-        rel="stylesheet"
-        href="/static/style.css"
-    >
-
+    <link rel="stylesheet" href="/static/style.css">
     <style>
-
         body {
             font-family: Arial, sans-serif;
             background: #f4f4f4;
             margin: 0;
             padding: 0;
         }
-
         .container {
             width: 90%;
             max-width: 1100px;
             margin: 40px auto;
+            padding-bottom: 60px;
         }
-
         .card {
             background: white;
             padding: 30px;
             border-radius: 10px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
-
-        h1, h2 {
+        h1, h2, h3 {
             margin-bottom: 20px;
         }
-
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px,1fr));
             gap: 20px;
         }
-
         label {
             display: block;
             margin-bottom: 6px;
             font-weight: bold;
         }
-
-        input,
-        select,
-        textarea {
+        input, select, textarea {
             width: 100%;
             padding: 10px;
             border-radius: 5px;
             border: 1px solid #ccc;
             box-sizing: border-box;
         }
-
         textarea {
             min-height: 100px;
         }
-
         table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
         }
-
-        table th,
-        table td {
+        table th, table td {
             border: 1px solid #ddd;
             padding: 10px;
             text-align: center;
         }
-
         table th {
             background: #f0f0f0;
         }
-
         .btn {
             background: #007bff;
             color: white;
@@ -92,25 +67,26 @@
             padding: 12px 20px;
             border-radius: 5px;
             cursor: pointer;
+            margin-top: 10px;
+            margin-right: 10px;
+        }
+        .btn:hover { background: #0056b3; }
+        .btn-green { background: #28a745; }
+        .btn-green:hover { background: #1e7e34; }
+        .btn-red { background: #dc3545; }
+        .btn-red:hover { background: #c82333; }
+        .hidden { display: none; }
+        .button-row {
             margin-top: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
         }
-
-        .btn:hover {
-            background: #0056b3;
-        }
-
-        .hidden {
-            display: none;
-        }
-
     </style>
-
 </head>
-
 <body>
-
+<h1 style="color:red;">FILE VERSION 2.0</h1>
 <div class="container">
-
     <div class="card">
 
         <h1>Create New Survey</h1>
@@ -119,445 +95,337 @@
             action="/survey/new"
             method="POST"
             enctype="multipart/form-data"
+            id="surveyForm"
         >
-
-            <!-- ========================= -->
-            <!-- SURVEY DETAILS -->
-            <!-- ========================= -->
 
             <h2>Survey Information</h2>
 
             <div class="grid">
-
                 <div>
                     <label>Title</label>
-
-                    <input
-                        type="text"
-                        name="title"
-                        required
-                    >
+                    <input type="text" name="title" required>
                 </div>
 
                 <div>
                     <label>Location</label>
-
-                    <input
-                        type="text"
-                        name="location"
-                        placeholder="Town, State"
-                        required
-                    >
+                    <input type="text" name="location" placeholder="Town, State" required>
                 </div>
 
                 <div>
-                    <label>Latitude</label>
-
-                    <input
-                        type="number"
-                        step="any"
-                        name="latitude"
-                        id="latitude"
+                   <label>Latitude</label>
+                    <input 
+                    type="number" 
+                    step="0.000001"
+                    name="latitude" 
+                    id="latitude"
+                    placeholder="e.g. 6.984623"
                     >
                 </div>
 
                 <div>
                     <label>Longitude</label>
-
-                    <input
-                        type="number"
-                        step="any"
-                        name="longitude"
+                     <input 
+                        type="number" 
+                        step="0.000001"
+                        name="longitude" 
                         id="longitude"
-                    >
+                        placeholder="e.g. 3.243555"
+                        >
                 </div>
-            <button
-                type="button"
-                class="btn"
-                onclick="detectLocation()"
-            >
-                Detect My Location
-            </button>
+                 <div class="button-row">
+                    <button type="button" class="btn" onclick="detectLocation()">
+                       📍 Detect My Location
+                    </button>
+                 </div>
                 <div>
                     <label>Terrain Type</label>
-
-                    <select
-                        name="terrain_type"
-                        required
-                    >
-                        <option value="">
-                            Select Terrain
-                        </option>
-
-                        <option value="basement">
-                            Basement
-                        </option>
-
-                        <option value="sedimentary">
-                            Sedimentary
-                        </option>
-
-                        <option value="transition">
-                            Transition Zone
-                        </option>
+                    <select name="terrain_type" required>
+                        <option value="">Select Terrain</option>
+                        <option value="basement">Basement</option>
+                        <option value="sedimentary">Sedimentary</option>
+                        <option value="transition">Transition Zone</option>
                     </select>
                 </div>
-
+                <div class="form-group">
+                    <label for="number_of_layers">Number of Layers</label>
+                    <input
+                        type="number"
+                        id="number_of_layers"
+                        name="number_of_layers"
+                        min="2"
+                        max="6"
+                        placeholder="e.g. 3"
+                        required
+                     >
+                </div>
                 <div>
                     <label>Survey Date</label>
-
-                    <input
-                        type="date"
-                        name="survey_date"
-                        required
-                    >
+                    <input type="date" name="survey_date" required>
                 </div>
+
+                <br>
+                
+                <div>
+                    <label>Geologic History</label>
+                    <textarea
+                      name="geologic_history"
+                       placeholder="Describe local geology, nearby outcrops, fractures, weathering profile..."
+                    ></textarea>
+                </div>
+
+                <br>
 
                 <div>
+                    <label>Previous Wells</label>
+                    <textarea
+                        name="previous_wells"
+                        placeholder="Nearby boreholes, depths, yields, failures..."
+                    ></textarea>
+                </div>
+                <div>
                     <label>Input Data Type</label>
-
-                    <select
-                        name="input_type"
-                        id="inputType"
-                        onchange="changeInputMode()"
-                        required
-                    >
-
-                        <option value="">
-                            Select Input Type
-                        </option>
-
-                        <option value="voltage">
-                            Voltage / Current
-                        </option>
-
-                        <option value="resistance">
-                            Resistance
-                        </option>
-
-                        <option value="resistivity">
-                            Apparent Resistivity
-                        </option>
-
-                        <option value="mixed">
-                            Mixed / Partial
-                        </option>
-
+                    <select name="input_type" id="inputType" onchange="changeInputMode()" required>
+                        <option value="">Select Input Type</option>
+                        <option value="voltage">Voltage / Current</option>
+                        <option value="resistance">Resistance</option>
+                        <option value="resistivity">Apparent Resistivity</option>
+                        <option value="mixed">Mixed / Partial</option>
                     </select>
                 </div>
-
             </div>
-
-            <br><br>
-
-            <div>
-                <label>Geologic History</label>
-
-                <textarea
-                    name="geologic_history"
-                    placeholder="Describe local geology, nearby outcrops, fractures, weathering profile, aquifer indications, lithology..."
-                ></textarea>
-            </div>
-
+           
             <br>
 
+            <h2>Data Input</h2>
+
             <div>
-                <label>Previous Wells</label>
-
-                <textarea
-                    name="previous_wells"
-                    placeholder="Nearby boreholes, depths, yields, failures, casing details..."
-                ></textarea>
+                <label>Upload CSV File (Optional)</label>
+                <input type="file" name="survey_file" accept=".csv,.xlsx,.xls">
             </div>
-            <h2>Data Input (Optional CSV)</h2>
 
-<input
-    type="file"
-    name="survey_file"
-    accept=".csv"
-/>
-
-<p style="color: gray;">
-    Or fill the table below manually
-</p>
-
-            <!-- ========================= -->
-            <!-- MEASUREMENTS -->
-            <!-- ========================= -->
+            <p style="color:gray; margin-top:10px;">
+                Or fill the table below manually:
+            </p>
 
             <h3>VES Measurements</h3>
 
             <table id="measurementTable">
-
                 <thead>
-
                     <tr>
-
-                        <th>AB/2</th>
-
-                        <th>MN/2</th>
-
-                        <th
-                            class="voltage-field hidden"
-                        >
-                            V_change
-                        </th>
-
-                        <th
-                            class="voltage-field hidden"
-                        >
-                            Current (I)
-                        </th>
-
-                        <th
-                            class="resistance-field hidden"
-                        >
-                            Resistance (R)
-                        </th>
-
-                        <th
-                            class="resistivity-field hidden"
-                        >
-                            Apparent Resistivity (ρa)
-                        </th>
-
+                        <th>AB/2 (m)</th>
+                        <th>MN/2 (m)</th>
+                        <th class="voltage-field hidden">ΔV</th>
+                        <th class="voltage-field hidden">Current (I)</th>
+                        <th class="resistance-field hidden">Resistance (R)</th>
+                        <th class="resistivity-field hidden">ρa (Ω·m)</th>
+                        <th>Remove</th>
                     </tr>
-
                 </thead>
-
                 <tbody id="measurementBody">
-
-                    <!-- ROWS INSERTED BY JS -->
-
                 </tbody>
-
             </table>
 
-            <button
-                type="button"
-                class="btn"
-                onclick="addRow()"
-            >
-                Add Measurement
-            </button>
+            <div class="button-row">
+                <button type="button" class="btn" onclick="addRow()">
+                    ➕ Add Row
+                </button>
+
+                <button type="button" class="btn btn-green" onclick="loadYabaTest()">
+                    🧪 Load Yaba Test Data
+                </button>
+                <button type="button" class="btn btn-green" onclick="loadMagbonTest()">
+                    🧪 Load Magbon Test Data
+                </button>
+                <button type="button" class="btn btn-red" onclick="clearRows()">
+                    🗑️ Clear All Rows
+                </button>
+            </div>
 
             <br><br>
 
-            <button
-                type="submit"
-                class="btn"
-            >
-                Save Survey
+            <button type="submit" class="btn" style="background:#b65a3c;">
+                💾 Save Survey
             </button>
 
         </form>
 
     </div>
-
 </div>
 
 <script>
 
+// =========================
+// DETECT LOCATION
+// =========================
 function detectLocation() {
-
     if (!navigator.geolocation) {
-
-        alert(
-            "Geolocation not supported."
-        )
-
+        alert("Geolocation not supported.")
         return
     }
-
     navigator.geolocation.getCurrentPosition(
-
         function(position) {
-
-            document.getElementById(
-                "latitude"
-            ).value =
-                position.coords.latitude
-
-            document.getElementById(
-                "longitude"
-            ).value =
-                position.coords.longitude
+            document.getElementById("latitude").value = 
+                position.coords.latitude.toFixed(6)
+            document.getElementById("longitude").value = 
+                position.coords.longitude.toFixed(6)
         },
-
         function() {
-
-            alert(
-                "Failed to get location."
-            )
+            alert("Failed to get location.")
         }
     )
 }
 
 // =========================
-// ADD TABLE ROW
+// ADD ROW
 // =========================
-
 function addRow() {
-
-    const tbody =
-        document.getElementById(
-            "measurementBody"
-        )
-
-    const row =
-        document.createElement("tr")
+    const tbody = document.getElementById("measurementBody")
+    const row = document.createElement("tr")
+    const rowIndex = tbody.children.length
 
     row.innerHTML = `
-
         <td>
-            <input
-                type="number"
-                step="any"
-                name="ab2[]"
-                required
-            >
+            <input type="number" step="any" name="ab2[]" required>
         </td>
-
         <td>
-            <input
-                type="number"
-                step="any"
-                name="mn2[]"
-                required
-            >
+            <input type="number" step="any" name="mn2[]">
         </td>
-
         <td class="voltage-field hidden">
-            <input
-                type="number"
-                step="any"
-                name="v_change"
-            >
+            <input type="number" step="any" name="v_change[]">
         </td>
-
         <td class="voltage-field hidden">
-            <input
-                type="number"
-                step="any"
-                name="current[]"
-            >
+            <input type="number" step="any" name="current[]">
         </td>
-
         <td class="resistance-field hidden">
-            <input
-                type="number"
-                step="any"
-                name="resistance[]"
-            >
+            <input type="number" step="any" name="resistance[]">
         </td>
-
         <td class="resistivity-field hidden">
-            <input
-                type="number"
-                step="any"
-                name="apparent_resistivity[]"
-            >
+            <input type="number" step="any" name="apparent_resistivity[]">
         </td>
-
+        <td>
+            <button type="button" onclick="removeRow(this)" style="background:red;color:white;border:none;padding:5px 10px;border-radius:3px;cursor:pointer;">
+                ✕
+            </button>
+        </td>
     `
 
     tbody.appendChild(row)
-
     changeInputMode()
+}
+
+// =========================
+// REMOVE ROW
+// =========================
+function removeRow(btn) {
+    btn.closest("tr").remove()
+}
+
+// =========================
+// CLEAR ALL ROWS
+// =========================
+function clearRows() {
+    document.getElementById("measurementBody").innerHTML = ""
 }
 
 // =========================
 // CHANGE INPUT MODE
 // =========================
-
 function changeInputMode() {
+    const mode = document.getElementById("inputType").value
 
-    const mode =
-        document.getElementById(
-            "inputType"
-        ).value
+    document.querySelectorAll(".voltage-field").forEach(el => el.classList.add("hidden"))
+    document.querySelectorAll(".resistance-field").forEach(el => el.classList.add("hidden"))
+    document.querySelectorAll(".resistivity-field").forEach(el => el.classList.add("hidden"))
 
-    // hide all
-    document.querySelectorAll(
-        ".voltage-field"
-    ).forEach(el => {
-        el.classList.add("hidden")
-    })
-
-    document.querySelectorAll(
-        ".resistance-field"
-    ).forEach(el => {
-        el.classList.add("hidden")
-    })
-
-    document.querySelectorAll(
-        ".resistivity-field"
-    ).forEach(el => {
-        el.classList.add("hidden")
-    })
-
-    // voltage mode
-    if (
-        mode === "voltage"
-    ) {
-
-        document.querySelectorAll(
-            ".voltage-field"
-        ).forEach(el => {
-            el.classList.remove("hidden")
-        })
-    }
-
-    // resistance mode
-    else if (
-        mode === "resistance"
-    ) {
-
-        document.querySelectorAll(
-            ".resistance-field"
-        ).forEach(el => {
-            el.classList.remove("hidden")
-        })
-    }
-
-    // resistivity mode
-    else if (
-        mode === "resistivity"
-    ) {
-
-        document.querySelectorAll(
-            ".resistivity-field"
-        ).forEach(el => {
-            el.classList.remove("hidden")
-        })
-    }
-
-    // mixed mode
-    else if (
-        mode === "mixed"
-    ) {
-
-        document.querySelectorAll(
-            ".voltage-field"
-        ).forEach(el => {
-            el.classList.remove("hidden")
-        })
-
-        document.querySelectorAll(
-            ".resistance-field"
-        ).forEach(el => {
-            el.classList.remove("hidden")
-        })
-
-        document.querySelectorAll(
-            ".resistivity-field"
-        ).forEach(el => {
-            el.classList.remove("hidden")
-        })
+    if (mode === "voltage") {
+        document.querySelectorAll(".voltage-field").forEach(el => el.classList.remove("hidden"))
+    } else if (mode === "resistance") {
+        document.querySelectorAll(".resistance-field").forEach(el => el.classList.remove("hidden"))
+    } else if (mode === "resistivity") {
+        document.querySelectorAll(".resistivity-field").forEach(el => el.classList.remove("hidden"))
+    } else if (mode === "mixed") {
+        document.querySelectorAll(".voltage-field").forEach(el => el.classList.remove("hidden"))
+        document.querySelectorAll(".resistance-field").forEach(el => el.classList.remove("hidden"))
+        document.querySelectorAll(".resistivity-field").forEach(el => el.classList.remove("hidden"))
     }
 }
 
-// create first row automatically
+// =========================
+// LOAD YABA TEST DATA
+// =========================
+function loadYabaTest() {
+    const testData = [
+        {ab2: 1,  mn2: 0.25,  rhoa: 798},
+        {ab2: 2,  mn2: 0.25,  rhoa: 891},
+        {ab2: 3,  mn2: 0.25,  rhoa: 900},
+        {ab2: 4,  mn2: 0.25,  rhoa: 910},
+        {ab2: 6,  mn2: 0.375, rhoa: 959},
+        {ab2: 8,  mn2: 0.5,   rhoa: 1000},
+        {ab2: 12, mn2: 0.5,   rhoa: 1100},
+        {ab2: 15, mn2: 0.75,  rhoa: 1250},
+        {ab2: 25, mn2: 1,     rhoa: 1350},
+        {ab2: 32, mn2: 1,     rhoa: 1420},
+        {ab2: 40, mn2: 1.75,  rhoa: 1550},
+        {ab2: 50, mn2: 2.5,   rhoa: 1800},
+        {ab2: 60, mn2: 2.5,   rhoa: 1900},
+        {ab2: 70, mn2: 2.5,   rhoa: 2200},
+        {ab2: 80, mn2: 2.5,   rhoa: 2500},
+        {ab2: 90, mn2: 2.5,   rhoa: 3000},
+    ]
+
+    // clear existing
+    clearRows()
+
+    // set input type to resistivity
+    document.getElementById("inputType").value = "resistivity"
+    changeInputMode()
+
+    // add rows with data
+    testData.forEach(d => {
+        addRow()
+        const rows = document.getElementById("measurementBody").querySelectorAll("tr")
+        const last = rows[rows.length - 1]
+        last.querySelector("[name='ab2[]']").value = d.ab2
+        last.querySelector("[name='mn2[]']").value = d.mn2
+        last.querySelector("[name='apparent_resistivity[]']").value = d.rhoa
+    })
+
+    alert("Yaba test data loaded! ✅")
+}
+function loadMagbonTest() {
+    const testData = [
+        {ab2: 1,  mn2: 0.25,  rhoa: 965},
+        {ab2: 2,  mn2: 0.25,  rhoa: 801},
+        {ab2: 3,  mn2: 0.25,  rhoa: 829},
+        {ab2: 4,  mn2: 0.25,  rhoa: 821},
+        {ab2: 6,  mn2: 0.375, rhoa: 842.50},
+        {ab2: 8,  mn2: 0.5,   rhoa: 937},
+        {ab2: 12, mn2: 0.5,   rhoa: 886},
+        {ab2: 15, mn2: 0.75,  rhoa: 857},
+        {ab2: 25, mn2: 1,     rhoa: 962},
+        {ab2: 32, mn2: 1,     rhoa: 919},
+        {ab2: 40, mn2: 1.75,  rhoa: 1169},
+        {ab2: 50, mn2: 2.5,   rhoa: 1164},
+        {ab2: 60, mn2: 2.5,   rhoa: 1293},
+        {ab2: 70, mn2: 2.5,   rhoa: 1389},
+    ]
+
+    clearRows()
+    document.getElementById("inputType").value = "resistivity"
+    changeInputMode()
+
+    testData.forEach(d => {
+        addRow()
+        const rows = document.getElementById("measurementBody").querySelectorAll("tr")
+        const last = rows[rows.length - 1]
+        last.querySelector("[name='ab2[]']").value = d.ab2
+        last.querySelector("[name='mn2[]']").value = d.mn2
+        last.querySelector("[name='apparent_resistivity[]']").value = d.rhoa
+    })
+
+    alert("Magbon test data loaded! ✅")
+}
+// create first row on load
 addRow()
 
 </script>

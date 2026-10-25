@@ -6,6 +6,18 @@ body {
     padding: 0;
 }
 
+.chart-container {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    margin-top: 40px;
+}
+
+#vesCurve {
+    border: 1px solid #000;
+    background: #fff;
+}
+
 .container {
     width: 100%;
     display: flex;

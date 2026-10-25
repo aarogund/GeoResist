@@ -1,15 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"georesist/database"
 	"georesist/handlers"
-<<<<<<< HEAD
-=======
 	"georesist/utils"
->>>>>>> ec7d6fb3ac126ba9fa48818abe6ada4bc5b8a551
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
@@ -18,6 +17,12 @@ import (
 func main() {
 	godotenv.Load()
 	database.Connect()
+	go func() {
+		for {
+			time.Sleep(24 * time.Hour)
+			database.DB.Exec("DELETE FROM token_blacklisted WHERE expires_at < NOW()")
+		}
+	}()
 	if os.Getenv("RUN_MIGRATION") == "true" {
 		database.Migrate()
 	}
@@ -35,25 +40,6 @@ func main() {
 	r.HandleFunc("/logout", handlers.LogoutHandler).Methods("POST")
 	r.HandleFunc("/verify-email", handlers.VerifyEmailHandler).Methods("GET")
 	r.HandleFunc("/forgot-password", handlers.ForgotPasswordHandler).Methods("GET", "POST")
-<<<<<<< HEAD
-	r.HandleFunc("/reset-password", handlers.ResetPasswordHandler).Methods("GET", "POST")
-	// survey routes
-	r.HandleFunc("/surveys", handlers.SurveysHandler).Methods("GET")
-	r.HandleFunc("/survey/new", handlers.SurveyNewHandler).Methods("GET", "POST")
-	r.HandleFunc("/survey/{id}", handlers.SurveyHandler).Methods("GET")
-	r.HandleFunc("/survey/{id}/results", handlers.SurveyResultsHandler).Methods("GET")
-	r.HandleFunc("/survey/{id}/edit", handlers.SurveyEditHandler).Methods("GET", "POST")
-
-	// report routes
-	r.HandleFunc("/report/{id}/new", handlers.ReportNewHandler).Methods("GET", "POST")
-	r.HandleFunc("/report/{id}/edit", handlers.ReportEditHandler).Methods("GET", "POST")
-	r.HandleFunc("/report/{id}/export", handlers.ReportExportHandler).Methods("GET")
-	r.HandleFunc("/report/{id}/share", handlers.ReportShareHandler).Methods("GET")
-
-	// api routes
-	r.HandleFunc("/api/survey/{id}/curve", handlers.ApiSurveyIdHandler).Methods("GET")
-	r.HandleFunc("/api/survey/{id}/layers", handlers.ApiSurveyLayersHandler).Methods("GET")
-=======
 
 	// PROTECTED routes - auth required
 	protected := r.PathPrefix("").Subrouter()
@@ -70,7 +56,6 @@ func main() {
 	protected.HandleFunc("/report/{id}/share", handlers.ReportShareHandler).Methods("GET")
 	protected.HandleFunc("/api/survey/{id}/curve", handlers.ApiSurveyIdHandler).Methods("GET")
 	protected.HandleFunc("/api/survey/{id}/layers", handlers.ApiSurveyLayersHandler).Methods("GET")
->>>>>>> ec7d6fb3ac126ba9fa48818abe6ada4bc5b8a551
 
 	// static files
 	fs := http.FileServer(http.Dir("./static"))
@@ -86,4 +71,6 @@ func main() {
 	}
 	log.Println("GeoResist running on port:", port)
 	log.Fatal(http.ListenAndServe(":"+port, r))
+	dir, _ := os.Getwd()
+	fmt.Println("Working directory:", dir)
 }

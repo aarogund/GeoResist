@@ -1,16 +1,19 @@
 package database
 
 import (
+	"fmt"
 	"log"
 )
 
 func Migrate() {
 	// drop tables in correct order (respect foreign keys!)
 	drops := []string{
-		`DROP TABLE IF EXISTS measurements`,
-		`DROP TABLE IF EXISTS reports`,
-		`DROP TABLE IF EXISTS surveys`,
-		`DROP TABLE IF EXISTS users`,
+		`DROP TABLE IF EXISTS measurements CASCADE`,
+		`DROP TABLE IF EXISTS reports CASCADE`,
+		`DROP TABLE IF EXISTS layers CASCADE`,
+		`DROP TABLE IF EXISTS surveys CASCADE`,
+		`DROP TABLE IF EXISTS users CASCADE`,
+		`DROP TABLE IF EXISTS token_blacklisted CASCADE`,
 	}
 	for _, query := range drops {
 		_, err := DB.Exec(query)
@@ -21,18 +24,6 @@ func Migrate() {
 
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS users (
-<<<<<<< HEAD
-            id          SERIAL PRIMARY KEY,
-            name        VARCHAR(100) NOT NULL,
-            email       VARCHAR(100) UNIQUE NOT NULL,
-            password_hash TEXT,
-		    email_verified BOOLEAN DEFAULT FALSE,
-		    verification_token TEXT,
-		    reset_token TEXT,
-		    reset_token_expiry TIMESTAMP
-            verified    BOOLEAN DEFAULT FALSE,
-            created_at  TIMESTAMP DEFAULT NOW()
-=======
             id                  SERIAL PRIMARY KEY,
             name                VARCHAR(100) NOT NULL,
             email               VARCHAR(100) UNIQUE NOT NULL,
@@ -40,23 +31,19 @@ func Migrate() {
             verified            BOOLEAN DEFAULT FALSE,
             verification_token  VARCHAR(64),      
             created_at          TIMESTAMP DEFAULT NOW()
->>>>>>> ec7d6fb3ac126ba9fa48818abe6ada4bc5b8a551
         )`,
 
 		`CREATE TABLE IF NOT EXISTS surveys (
             id              SERIAL PRIMARY KEY,
             user_id         INTEGER REFERENCES users(id),
             title           VARCHAR(200) NOT NULL,
-            location        VARCHAR(200), NOT NULL
-            latitude        DECIMAL(10,8),
-            longitude       DECIMAL(11,8),
-<<<<<<< HEAD
-            terrain_type    VARCHAR(20), NOT NULL
-=======
+            location        VARCHAR(200) NOT NULL,
+            latitude        DECIMAL(10,6),
+            longitude       DECIMAL(11,6),
             terrain_type    VARCHAR(20),
+            number_of_layers  INTEGER,
             geologic_history  TEXT,
             previous_wells    TEXT,
->>>>>>> ec7d6fb3ac126ba9fa48818abe6ada4bc5b8a551
             date            DATE,
             status          VARCHAR(20) DEFAULT 'pending',
             created_at      TIMESTAMP DEFAULT NOW()
@@ -78,8 +65,8 @@ func Migrate() {
              id              SERIAL PRIMARY KEY,
              survey_id       INTEGER REFERENCES surveys(id),
              layer_number    INTEGER,
-             depth_from      DECIMAL(10,2),
-             depth_to        DECIMAL(10,2),
+             thickness      DECIMAL(10,2),
+             depth       DECIMAL(10,2),
              resistivity     DECIMAL(15,4),
              lithology       VARCHAR(200),
              interpretation  TEXT,
@@ -102,12 +89,18 @@ func Migrate() {
             pdf_url             VARCHAR(500),
             created_at          TIMESTAMP DEFAULT NOW()
         )`,
+		`CREATE TABLE IF NOT EXISTS token_blacklisted (
+            jti VARCHAR(36) PRIMARY KEY,
+            expires_at TIMESTAMP NOT NULL,
+            revoked_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )`,
 	}
 
-	for _, query := range queries {
+	for i, query := range queries {
+		fmt.Println("Running query", i+1)
 		_, err := DB.Exec(query)
 		if err != nil {
-			log.Fatal("Migration error:", err)
+			log.Fatalf("Migration error: %v\nFull Query: %s\n", err, query)
 		}
 	}
 
