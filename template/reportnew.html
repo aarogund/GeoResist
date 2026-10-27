@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Create Report | GeoResist</title>
+    <style>
+        body {
+            font: 16px/1.6 Arial, sans-serif;
+            background: #f4f7fb;
+            color: #243447;
+        }
+
+        main {
+            max-width: 900px;
+            margin: 30px auto;
+            padding: 20px;
+        }
+
+        section {
+            background: white;
+            padding: 26px;
+            border: 1px solid #dbe3eb;
+            border-radius: 10px;
+            margin-bottom: 24px;
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin: 16px 0 6px;
+        }
+
+        input, textarea, select {
+            box-sizing: border-box;
+            width: 100%;
+            padding: 11px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font: inherit;
+        }
+
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        button, .btn {
+            display: inline-block;
+            padding: 11px 16px;
+            border: 0;
+            border-radius: 6px;
+            background: #1769aa;
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+            font: inherit;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: wait;
+        }
+
+        .error {
+            background: #fff0f0;
+            color: #9b1c1c;
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .success {
+            background: #eaf8ee;
+            color: #176534;
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .muted {
+            color: #637487;
+        }
+    </style>
+</head>
+<body>
+<main>
+    <p>
+        <a href="/survey/{{.SurveyID}}/results">
+            ← Back to survey results
+        </a>
+    </p>
+
+    <section>
+        <h1>Create Geophysical Report</h1>
+        <p><strong>Survey:</strong> {{.SurveyTitle}}</p>
+        <p><strong>Location:</strong> {{.Location}}</p>
+
+        {{if .Error}}
+            <p class="error">{{.Error}}</p>
+        {{end}}
+
+        <form method="POST" action="/report/{{.SurveyID}}/new">
+            <label for="introduction">Introduction *</label>
+            <textarea id="introduction" name="introduction" required>{{.Report.Introduction}}</textarea>
+
+            <label for="executive_summary">Executive Summary *</label>
+            <textarea id="executive_summary" name="executive_summary" required>{{.Report.ExecutiveSummary}}</textarea>
+
+            <label for="local_geology">Local Geology</label>
+            <textarea id="local_geology" name="local_geology">{{.Report.LocalGeology}}</textarea>
+
+            <label for="methodology">Methodology</label>
+            <textarea id="methodology" name="methodology">{{.Report.Methodology}}</textarea>
+
+            <label for="results">Results</label>
+            <textarea id="results" name="results">{{.Report.Results}}</textarea>
+
+            <label for="discussion">Discussion</label>
+            <textarea id="discussion" name="discussion">{{.Report.Discussion}}</textarea>
+
+            <label for="recommendations">Recommendations</label>
+            <textarea id="recommendations" name="recommendations">{{.Report.Recommendations}}</textarea>
+
+            <label for="drill_depth">Recommended Drill Depth (metres)</label>
+            <input
+                id="drill_depth"
+                name="drill_depth"
+                type="number"
+                min="0"
+                step="0.01"
+                value="{{.Report.DrillDepth}}"
+            >
+
+            <label for="aquifer_detected">Aquifer detected?</label>
+            <select id="aquifer_detected" name="aquifer_detected">
+                <option value="false" {{if not .Report.AquiferDetected}}selected{{end}}>
+                    No / not confirmed
+                </option>
+                <option value="true" {{if .Report.AquiferDetected}}selected{{end}}>
+                    Yes
+                </option>
+            </select>
+
+            <p>
+                <button type="submit">Save Report</button>
+                <a class="btn" href="/survey/{{.SurveyID}}/results">Cancel</a>
+            </p>
+        </form>
+    </section>
+
+    <section>
+        <h2>Email PDF Report</h2>
+        <p class="muted">
+            Save your report first. Then enter the recipient's email address
+            to send the report as a PDF attachment.
+        </p>
+
+        <form id="email-report-form">
+            <label for="report-email">Recipient email address</label>
+            <input
+                id="report-email"
+                name="email"
+                type="email"
+                placeholder="recipient@example.com"
+                required
+            >
+
+            <p>
+                <button id="email-report-button" type="submit">
+                    Email PDF Report
+                </button>
+            </p>
+
+            <p id="email-report-status" role="status" aria-live="polite"></p>
+        </form>
+    </section>
+</main>
+
+<script>
+(function () {
+    const form = document.getElementById("email-report-form");
+    const button = document.getElementById("email-report-button");
+    const status = document.getElementById("email-report-status");
+
+    // Uses the same survey ID as the existing report creation form.
+    const surveyID = "{{.SurveyID}}";
+
+    form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+
+        button.disabled = true;
+        status.className = "";
+        status.textContent = "Sending report...";
+
+        try {
+            const email = document.getElementById("report-email").value.trim();
+
+            const response = await fetch(
+                "/report/" + encodeURIComponent(surveyID) + "/email",
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    body: new URLSearchParams({ email: email })
+                }
+            );
+
+            const message = await response.text();
+
+            if (!response.ok) {
+                throw new Error(message || "Unable to send the report.");
+            }
+
+            status.className = "success";
+            status.textContent = message;
+        } catch (error) {
+            status.className = "error";
+            status.textContent = error.message || "Email delivery failed.";
+        } finally {
+            button.disabled = false;
+        }
+    });
+})();
+</script>
+</body>
+</html>

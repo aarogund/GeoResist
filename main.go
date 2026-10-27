@@ -42,13 +42,17 @@ func main() {
 	r.HandleFunc("/forgot-password", handlers.ForgotPasswordHandler).Methods("GET", "POST")
 
 	// PROTECTED routes - auth required
+
 	protected := r.PathPrefix("").Subrouter()
 	protected.Use(utils.JWTMiddleware)
+
 	protected.HandleFunc("/dashboard", handlers.DashboardHandler).Methods("GET")
 	protected.HandleFunc("/surveys", handlers.SurveysHandler).Methods("GET")
 	protected.HandleFunc("/survey/new", handlers.SurveyNewHandler).Methods("GET", "POST")
 	protected.HandleFunc("/survey/{id}", handlers.SurveyHandler).Methods("GET")
 	protected.HandleFunc("/survey/{id}/results", handlers.SurveyResultsHandler).Methods("GET")
+	protected.HandleFunc("/survey/{id}/results/edit", handlers.ResultEditHandler).Methods("GET")
+	protected.HandleFunc("/survey/{id}/results/edit", handlers.ResultUpdateHandler).Methods("POST")
 	protected.HandleFunc("/survey/{id}/edit", handlers.SurveyEditHandler).Methods("GET", "POST")
 	protected.HandleFunc("/report/{id}/new", handlers.ReportNewHandler).Methods("GET", "POST")
 	protected.HandleFunc("/report/{id}/edit", handlers.ReportEditHandler).Methods("GET", "POST")
@@ -56,6 +60,8 @@ func main() {
 	protected.HandleFunc("/report/{id}/share", handlers.ReportShareHandler).Methods("GET")
 	protected.HandleFunc("/api/survey/{id}/curve", handlers.ApiSurveyIdHandler).Methods("GET")
 	protected.HandleFunc("/api/survey/{id}/layers", handlers.ApiSurveyLayersHandler).Methods("GET")
+	protected.HandleFunc("/report/{id}/email", handlers.ReportEmailHandler).Methods("POST")
+	protected.HandleFunc("/report/{id}/email", handlers.ReportEmailHandler).Methods("POST")
 
 	// static files
 	fs := http.FileServer(http.Dir("./static"))

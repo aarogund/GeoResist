@@ -114,12 +114,31 @@ func SmoothMeasurements(measurements []models.Measurement) []models.Measurement 
 // CALCULATE K (SCHLUMBERGER)
 // =====================================================
 
+// CalculateK returns the Schlumberger geometric factor when AB2 and MN2
+// are the half-spacings AB/2 and MN/2, expressed in the same distance unit.
+// K = pi * ((AB/2)^2 - (MN/2)^2) / (2 * (MN/2)).
 func CalculateK(ab2, mn2 float64) float64 {
-	return math.Pi * ((ab2 * ab2) - (mn2 * mn2)) / (2 * (ab2 - mn2))
+	if !finitePositive(ab2) || !finitePositive(mn2) || ab2 <= mn2 {
+		return 0
+	}
+	return math.Pi * (ab2*ab2 - mn2*mn2) / (2 * mn2)
 }
 
+// CalculateRhoA calculates apparent resistivity (ohm metres when spacings
+// are in metres and resistance is in ohms). Invalid inputs return zero;
+// callers should validate inputs before treating the result as a measurement.
 func CalculateRhoA(k, resistance float64) float64 {
+	if !finitePositive(k) || !finiteNonNegative(resistance) {
+		return 0
+	}
 	return k * resistance
+}
+
+func finitePositive(v float64) bool {
+	return v > 0 && !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+func finiteNonNegative(v float64) bool {
+	return v >= 0 && !math.IsNaN(v) && !math.IsInf(v, 0)
 }
 
 const (
@@ -455,6 +474,19 @@ type LayerFitResult struct {
 	Thicknesses   []float64
 	Computed      []float64
 	RMSLogError   float64
+	// Sensitivity records the change in LogRMS after a +/-10% perturbation
+	// of each fitted parameter. It is a local diagnostic, not a confidence interval.
+	Sensitivity []LayerParameterSensitivity
+}
+
+// LayerParameterSensitivity describes local objective sensitivity.
+// Small score changes indicate that the parameter is weakly constrained by
+// the available sounding data.
+type LayerParameterSensitivity struct {
+	Parameter        string
+	Minus10PctLogRMS float64
+	Plus10PctLogRMS  float64
+	MinDeltaLogRMS   float64
 }
 
 // initialLayerResistivities estimates starting resistivities from
@@ -514,6 +546,10 @@ func layerFitObjective(
 	observed := make([]float64, len(measurements))
 
 	for i, m := range measurements {
+		if !isPositiveFinite(m.AB2) ||
+			!isPositiveFinite(m.ApparentResistivity) {
+			return math.Inf(1)
+		}
 		ab2[i] = m.AB2
 		observed[i] = m.ApparentResistivity
 	}
@@ -549,10 +585,12 @@ func fitLayerModelFromStart(
 		return LayerFitResult{}, fmt.Errorf("layer count must be at least 1")
 	}
 
-	if len(data) < layerCount+1 {
+	if len(data) < 2*layerCount-1 {
 		return LayerFitResult{}, fmt.Errorf(
-			"need more valid measurements to fit %d layers",
+			"need at least %d valid measurements to fit %d layers; got %d",
+			2*layerCount-1,
 			layerCount,
+			len(data),
 		)
 	}
 
@@ -614,70 +652,28 @@ func fitLayerModelFromStart(
 		)
 	}
 
-	// Search in logarithmic parameter space so updates are multiplicative
-	// and all tested resistivities and thicknesses remain positive.
-	parameters := append([]float64(nil), rho...)
-	parameters = append(parameters, thickness...)
-
+	// Optimize log-parameters with damped least squares (Levenberg-Marquardt).
+	// A coordinate-search pass is retained as a fallback if LM cannot improve
+	// the starting model, since the forward response can be locally ill-conditioned.
+	parameters := make([]float64, 0, len(rho)+len(thickness))
+	for _, value := range rho {
+		parameters = append(parameters, math.Log(value))
+	}
+	for _, value := range thickness {
+		parameters = append(parameters, math.Log(value))
+	}
 	lower := make([]float64, len(parameters))
 	upper := make([]float64, len(parameters))
-
 	for i := range rho {
-		lower[i], upper[i] = 1, 100000
+		lower[i], upper[i] = math.Log(1), math.Log(100000)
 	}
 	for i := range thickness {
 		j := len(rho) + i
-		lower[j], upper[j] = 0.5, 500
+		lower[j], upper[j] = math.Log(0.5), math.Log(500)
 	}
-
-	step := math.Log(2.0)
-
-	for iteration := 0; iteration < 100; iteration++ {
-		improved := false
-
-		for p := range parameters {
-			original := parameters[p]
-			bestValue := original
-
-			for _, direction := range []float64{-1, 1} {
-				candidateValue := original * math.Exp(direction*step)
-
-				if candidateValue < lower[p] ||
-					candidateValue > upper[p] {
-					continue
-				}
-
-				parameters[p] = candidateValue
-
-				candidateRho := append([]float64(nil), parameters[:layerCount]...)
-				candidateThickness := append(
-					[]float64(nil),
-					parameters[layerCount:]...,
-				)
-
-				score := layerFitObjective(
-					data,
-					candidateRho,
-					candidateThickness,
-				)
-
-				if score < best {
-					best = score
-					bestValue = candidateValue
-					improved = true
-				}
-			}
-
-			parameters[p] = bestValue
-		}
-
-		if !improved {
-			step *= 0.5
-		}
-
-		if step < 0.005 {
-			break
-		}
+	parameters, best = optimizeVESLevenbergMarquardt(data, parameters, layerCount, lower, upper, best)
+	for i := range parameters {
+		parameters[i] = math.Exp(parameters[i])
 	}
 
 	rho = append([]float64(nil), parameters[:layerCount]...)
@@ -698,6 +694,171 @@ func fitLayerModelFromStart(
 	}, nil
 }
 
+// optimizeVESLevenbergMarquardt minimizes log-space residuals using numerical
+// derivatives and a damped Gauss-Newton step. Parameters are supplied in log space.
+func optimizeVESLevenbergMarquardt(data []models.Measurement, x []float64, layerCount int, lower, upper []float64, initialScore float64) ([]float64, float64) {
+	bestX := append([]float64(nil), x...)
+	residuals := vesLogResiduals(data, bestX, layerCount)
+	score := residualRMS(residuals)
+	if !isPositiveFinite(score) && score != 0 {
+		return bestX, initialScore
+	}
+	if initialScore < score {
+		score = initialScore
+	}
+	lambda := 1e-2
+	for iter := 0; iter < 100; iter++ {
+		n, m := len(bestX), len(residuals)
+		jac := make([][]float64, m)
+		for i := range jac {
+			jac[i] = make([]float64, n)
+		}
+		for j := 0; j < n; j++ {
+			xp := append([]float64(nil), bestX...)
+			h := 1e-4
+			xp[j] = math.Min(upper[j], bestX[j]+h)
+			xm := append([]float64(nil), bestX...)
+			xm[j] = math.Max(lower[j], bestX[j]-h)
+			rp, rm := vesLogResiduals(data, xp, layerCount), vesLogResiduals(data, xm, layerCount)
+			denom := xp[j] - xm[j]
+			if denom == 0 {
+				continue
+			}
+			for i := 0; i < m; i++ {
+				jac[i][j] = (rp[i] - rm[i]) / denom
+			}
+		}
+		normal := make([][]float64, n)
+		rhs := make([]float64, n)
+		for i := 0; i < n; i++ {
+			normal[i] = make([]float64, n)
+			for j := 0; j < n; j++ {
+				for k := 0; k < m; k++ {
+					normal[i][j] += jac[k][i] * jac[k][j]
+				}
+			}
+			for k := 0; k < m; k++ {
+				rhs[i] -= jac[k][i] * residuals[k]
+			}
+			normal[i][i] += lambda * math.Max(normal[i][i], 1e-8)
+		}
+		delta, ok := solveDenseSystem(normal, rhs)
+		if !ok {
+			lambda *= 10
+			if lambda > 1e12 {
+				break
+			}
+			continue
+		}
+		candidate := append([]float64(nil), bestX...)
+		for i := range candidate {
+			candidate[i] = math.Max(lower[i], math.Min(upper[i], candidate[i]+delta[i]))
+		}
+		candidateResiduals := vesLogResiduals(data, candidate, layerCount)
+		candidateScore := residualRMS(candidateResiduals)
+		if isFinite(candidateScore) && candidateScore < score {
+			bestX, residuals, score = candidate, candidateResiduals, candidateScore
+			lambda = math.Max(lambda/3, 1e-12)
+			if maxAbs(delta) < 1e-6 {
+				break
+			}
+		} else {
+			lambda *= 10
+			if lambda > 1e12 {
+				break
+			}
+		}
+	}
+	// Never return a worse score than the original coordinate-search start.
+	if score > initialScore {
+		return x, initialScore
+	}
+	return bestX, score
+}
+
+func vesLogResiduals(data []models.Measurement, logParams []float64, layerCount int) []float64 {
+	rho := make([]float64, layerCount)
+	thickness := make([]float64, len(logParams)-layerCount)
+	for i := range rho {
+		rho[i] = math.Exp(logParams[i])
+	}
+	for i := range thickness {
+		thickness[i] = math.Exp(logParams[layerCount+i])
+	}
+	ab2 := make([]float64, len(data))
+	observed := make([]float64, len(data))
+	for i, d := range data {
+		ab2[i], observed[i] = d.AB2, d.ApparentResistivity
+	}
+	computed := ForwardModel(ab2, rho, thickness)
+	result := make([]float64, len(data))
+	for i := range data {
+		if !isPositiveFinite(computed[i]) || !isPositiveFinite(observed[i]) {
+			result[i] = math.Inf(1)
+			continue
+		}
+		result[i] = math.Log(computed[i]) - math.Log(observed[i])
+	}
+	return result
+}
+
+func residualRMS(r []float64) float64 {
+	if len(r) == 0 {
+		return math.Inf(1)
+	}
+	sum := 0.0
+	for _, v := range r {
+		if !isFinite(v) {
+			return math.Inf(1)
+		}
+		sum += v * v
+	}
+	return math.Sqrt(sum / float64(len(r)))
+}
+
+func solveDenseSystem(a [][]float64, b []float64) ([]float64, bool) {
+	n := len(b)
+	for i := 0; i < n; i++ {
+		pivot := i
+		for r := i + 1; r < n; r++ {
+			if math.Abs(a[r][i]) > math.Abs(a[pivot][i]) {
+				pivot = r
+			}
+		}
+		if math.Abs(a[pivot][i]) < 1e-18 {
+			return nil, false
+		}
+		a[i], a[pivot], b[i], b[pivot] = a[pivot], a[i], b[pivot], b[i]
+		d := a[i][i]
+		for j := i; j < n; j++ {
+			a[i][j] /= d
+		}
+		b[i] /= d
+		for r := 0; r < n; r++ {
+			if r == i {
+				continue
+			}
+			f := a[r][i]
+			for j := i; j < n; j++ {
+				a[r][j] -= f * a[i][j]
+			}
+			b[r] -= f * b[i]
+		}
+	}
+	return b, true
+}
+
+func maxAbs(v []float64) float64 {
+	m := 0.0
+	for _, x := range v {
+		if math.Abs(x) > m {
+			m = math.Abs(x)
+		}
+	}
+	return m
+}
+func isFinite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
 func FitLayerModel(
 	measurements []models.Measurement,
 	boundaries []LayerBoundary,
@@ -711,10 +872,12 @@ func FitLayerModel(
 		)
 	}
 
-	if len(data) < layerCount+1 {
+	if len(data) < 2*layerCount-1 {
 		return LayerFitResult{}, fmt.Errorf(
-			"need more valid measurements to fit %d layers",
+			"need at least %d valid measurements to fit %d layers; got %d",
+			2*layerCount-1,
 			layerCount,
+			len(data),
 		)
 	}
 
@@ -746,18 +909,26 @@ func FitLayerModel(
 		baseThickness[i] = math.Max(b.AB2/2, 1.0)
 	}
 
-	// Each start uses a different scale for resistivity and thickness.
-	// These are alternative starting guesses, not geological priors.
-	starts := []struct {
-		rhoScale       float64
-		thicknessScale float64
-	}{
-		{1.0, 1.0},
-		{0.7, 0.7},
-		{1.4, 1.4},
-		{0.7, 1.5},
-		{1.5, 0.7},
+	// Deterministic multistart search. Uniform scales alone can leave the
+	// optimizer trapped when one layer (especially the middle layer of a
+	// K-type curve) needs a very different initial resistivity.
+	type fitStart struct {
+		rhoScale       []float64
+		thicknessScale []float64
 	}
+	starts := []fitStart{
+		{[]float64{1, 1, 1}, []float64{1, 1}},
+		{[]float64{0.5, 1, 2}, []float64{0.7, 1.4}},
+		{[]float64{2, 1, 0.5}, []float64{1.4, 0.7}},
+		{[]float64{1, 0.25, 1}, []float64{1, 1}},
+		{[]float64{1, 4, 1}, []float64{1, 1}},
+		{[]float64{0.25, 1, 4}, []float64{0.5, 2}},
+		{[]float64{4, 1, 0.25}, []float64{2, 0.5}},
+		{[]float64{0.5, 2, 0.5}, []float64{0.5, 2}},
+		{[]float64{2, 0.5, 2}, []float64{2, 0.5}},
+	}
+	// Extend the scale templates to arbitrary layer counts by applying the
+	// nearest available template factor cyclically.
 
 	var bestFit LayerFitResult
 	bestScore := math.Inf(1)
@@ -766,12 +937,14 @@ func FitLayerModel(
 	for _, start := range starts {
 		initialRho := make([]float64, len(baseRho))
 		for i, value := range baseRho {
-			initialRho[i] = value * start.rhoScale
+			scale := start.rhoScale[i%len(start.rhoScale)]
+			initialRho[i] = math.Max(1, math.Min(100000, value*scale))
 		}
 
 		initialThickness := make([]float64, len(baseThickness))
 		for i, value := range baseThickness {
-			initialThickness[i] = value * start.thicknessScale
+			scale := start.thicknessScale[i%len(start.thicknessScale)]
+			initialThickness[i] = math.Max(0.5, math.Min(500, value*scale))
 		}
 
 		fit, err := fitLayerModelFromStart(
@@ -812,7 +985,46 @@ func FitLayerModel(
 		)
 	}
 
+	bestFit.Sensitivity = calculateLayerFitSensitivity(data, bestFit)
 	return bestFit, nil
+}
+
+func calculateLayerFitSensitivity(
+	data []models.Measurement,
+	fit LayerFitResult,
+) []LayerParameterSensitivity {
+	result := make([]LayerParameterSensitivity, 0,
+		len(fit.Resistivities)+len(fit.Thicknesses))
+
+	for i, value := range fit.Resistivities {
+		minusRho := append([]float64(nil), fit.Resistivities...)
+		plusRho := append([]float64(nil), fit.Resistivities...)
+		minusRho[i] = value * 0.9
+		plusRho[i] = value * 1.1
+		minusScore := layerFitObjective(data, minusRho, fit.Thicknesses)
+		plusScore := layerFitObjective(data, plusRho, fit.Thicknesses)
+		result = append(result, LayerParameterSensitivity{
+			Parameter:        fmt.Sprintf("resistivity_layer_%d", i+1),
+			Minus10PctLogRMS: minusScore,
+			Plus10PctLogRMS:  plusScore,
+			MinDeltaLogRMS:   math.Min(minusScore-fit.RMSLogError, plusScore-fit.RMSLogError),
+		})
+	}
+	for i, value := range fit.Thicknesses {
+		minusThickness := append([]float64(nil), fit.Thicknesses...)
+		plusThickness := append([]float64(nil), fit.Thicknesses...)
+		minusThickness[i] = value * 0.9
+		plusThickness[i] = value * 1.1
+		minusScore := layerFitObjective(data, fit.Resistivities, minusThickness)
+		plusScore := layerFitObjective(data, fit.Resistivities, plusThickness)
+		result = append(result, LayerParameterSensitivity{
+			Parameter:        fmt.Sprintf("thickness_layer_%d", i+1),
+			Minus10PctLogRMS: minusScore,
+			Plus10PctLogRMS:  plusScore,
+			MinDeltaLogRMS:   math.Min(minusScore-fit.RMSLogError, plusScore-fit.RMSLogError),
+		})
+	}
+	return result
 }
 
 // =====================================================

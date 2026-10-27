@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"database/sql"
-	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"georesist/database"
 	"georesist/models"
@@ -12,109 +12,226 @@ import (
 	"log"
 	"math"
 	"net/http"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/xuri/excelize/v2"
+	"time"
 
 	"github.com/gorilla/mux"
 )
 
 func SurveyNewHandler(w http.ResponseWriter, r *http.Request) {
-
-	// =========================
-	// SHOW PAGE
-	// =========================
-	if r.Method == "GET" {
-		fmt.Println("Loading surveynew.html")
+	if r.Method == http.MethodGet {
 		tmpl, err := template.ParseFiles("template/surveynew.html")
 		if err != nil {
-			fmt.Println("Template error:", err)
+			log.Printf("parse survey form: %v", err)
 			http.Error(w, "failed to load page", http.StatusInternalServerError)
 			return
 		}
-
-		tmpl.Execute(w, nil)
+		if err := tmpl.Execute(w, nil); err != nil {
+			log.Printf("render survey form: %v", err)
+		}
 		return
 	}
-
-	// =========================
-	// ONLY ALLOW POST
-	// =========================
-	if r.Method != "POST" {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// =========================
-	// PARSE MULTIPART FORM
-	// =========================
-	err := r.ParseMultipartForm(10 << 20)
-
-	if err != nil {
-
-		// fallback to normal form parsing
-		err = r.ParseForm()
-
-		if err != nil {
-
-			http.Error(
-				w,
-				"failed to parse form",
-				http.StatusBadRequest,
-			)
-
+	// Limit total request size, including multipart overhead.
+	r.Body = http.MaxBytesReader(w, r.Body, 25<<20)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		if err = r.ParseForm(); err != nil {
+			http.Error(w, "invalid or oversized form submission", http.StatusBadRequest)
 			return
 		}
 	}
 
-	// =========================
-	// AUTH USER
-	// =========================
-	userVal := r.Context().Value(utils.UserContextKey)
-
-	if userVal == nil {
+	userID, ok := r.Context().Value(utils.UserContextKey).(int)
+	if !ok || userID <= 0 {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	userID, ok := userVal.(int)
-	if !ok {
-		http.Error(w, "invalid user context", http.StatusUnauthorized)
+	title := strings.TrimSpace(r.FormValue("title"))
+	location := strings.TrimSpace(r.FormValue("location"))
+	terrainType := strings.TrimSpace(r.FormValue("terrain_type"))
+	geologicHistory := strings.TrimSpace(r.FormValue("geologic_history"))
+	previousWells := strings.TrimSpace(r.FormValue("previous_wells"))
+	if title == "" || location == "" {
+		http.Error(w, "survey title and location are required", http.StatusBadRequest)
+		return
+	}
+	switch strings.ToLower(terrainType) {
+	case "basement", "sedimentary", "transition zone", "":
+	default:
+		http.Error(w, "terrain type must be basement, sedimentary, or transition zone", http.StatusBadRequest)
 		return
 	}
 
-	// =========================
-	// GET SURVEY FIELDS
-	// =========================
-	title := r.FormValue("title")
+	var layerCount any
+	if raw := strings.TrimSpace(r.FormValue("number_of_layers")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 20 {
+			http.Error(w, "number of layers must be between 1 and 20", http.StatusBadRequest)
+			return
+		}
+		layerCount = n
+	}
 
-	location := r.FormValue("location")
+	var surveyDate any
+	if raw := strings.TrimSpace(r.FormValue("survey_date")); raw != "" {
+		d, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			http.Error(w, "survey date must use YYYY-MM-DD format", http.StatusBadRequest)
+			return
+		}
+		surveyDate = d
+	}
 
-	terrainType := r.FormValue("terrain_type")
+	latitude, err := optionalCoordinate(r.FormValue("latitude"), -90, 90)
+	if err != nil {
+		http.Error(w, "latitude must be a number between -90 and 90", http.StatusBadRequest)
+		return
+	}
+	longitude, err := optionalCoordinate(r.FormValue("longitude"), -180, 180)
+	if err != nil {
+		http.Error(w, "longitude must be a number between -180 and 180", http.StatusBadRequest)
+		return
+	}
 
-	numberOfLayers := r.FormValue("number_of_layers")
-	numberOfLayersInt, _ := strconv.Atoi(numberOfLayers)
+	measurements, err := readSubmittedMeasurements(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(measurements) == 0 {
+		http.Error(w, "provide a CSV/Excel file or at least one complete manual measurement", http.StatusBadRequest)
+		return
+	}
+	if len(measurements) > 5000 {
+		http.Error(w, "a survey cannot contain more than 5000 measurement rows", http.StatusBadRequest)
+		return
+	}
 
-	geologicHistory := r.FormValue("geologic_history")
+	tx, err := database.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("begin survey transaction: %v", err)
+		http.Error(w, "could not save survey", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
 
-	previousWells := r.FormValue("previous_wells")
-
-	surveyDate := r.FormValue("survey_date")
-
-	latitude := r.FormValue("latitude")
-
-	longitude := r.FormValue("longitude")
-
-	// =========================
-	// SAVE SURVEY
-	// =========================
 	var surveyID int
+	err = tx.QueryRowContext(r.Context(), `
+		INSERT INTO surveys (
+			user_id, title, location, terrain_type, number_of_layers,
+			geologic_history, previous_wells, date, latitude, longitude
+		)
+		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,$10)
+		RETURNING id`,
+		userID, title, location, terrainType, layerCount,
+		nullIfEmpty(geologicHistory), nullIfEmpty(previousWells),
+		surveyDate, latitude, longitude,
+	).Scan(&surveyID)
+	if err != nil {
+		log.Printf("insert survey: %v", err)
+		http.Error(w, "failed to save survey", http.StatusInternalServerError)
+		return
+	}
+
+	stmt, err := tx.PrepareContext(r.Context(), `
+		INSERT INTO measurements (
+			survey_id, serial_number, ab2, mn2, voltage, electric_current,
+			resistance, geometric_factor, apparent_resistivity
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`)
+	if err != nil {
+		log.Printf("prepare measurement insert: %v", err)
+		http.Error(w, "failed to save measurements", http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	for i, m := range measurements {
+		_, err = stmt.ExecContext(r.Context(), surveyID, nullableInt(m.SerialNumber),
+			m.AB2, nullableFloat(m.MN2), nullableFloat(m.Voltage),
+			nullableFloat(m.ElectricCurrent), nullableFloat(m.Resistance),
+			nullableFloat(m.GeometricFactor), m.ApparentResistivity)
+		if err != nil {
+			log.Printf("insert measurement row %d for survey %d: %v", i+1, surveyID, err)
+			http.Error(w, "failed to save all measurements; no survey changes were committed", http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("commit survey %d: %v", surveyID, err)
+		http.Error(w, "failed to save survey", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/survey/"+strconv.Itoa(surveyID)+"/results", http.StatusSeeOther)
+}
+
+func optionalCoordinate(raw string, min, max float64) (any, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < min || v > max {
+		return nil, errors.New("invalid coordinate")
+	}
+	return v, nil
+}
+
+func nullIfEmpty(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
+}
+func nullableFloat(v float64) any {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+func nullableInt(v int) any {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+
+func SurveyHandler(w http.ResponseWriter, r *http.Request) {
+	// Only allow GET requests.
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Get the authenticated user's ID from the request context.
+	userID, ok := r.Context().Value(utils.UserContextKey).(int)
+	if !ok || userID <= 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// 2. Extract the survey ID from the URL.
+	idParam := mux.Vars(r)["id"]
+
+	surveyID, err := strconv.Atoi(idParam)
+	if err != nil || surveyID <= 0 {
+		http.Error(w, "Invalid survey ID", http.StatusBadRequest)
+		return
+	}
+
+	// 3. Retrieve the survey, enforcing ownership in the SQL query.
+	var survey models.Survey
 
 	err = database.DB.QueryRow(`
-		INSERT INTO surveys (
+		SELECT
+			id,
 			user_id,
 			title,
 			location,
@@ -125,791 +242,120 @@ func SurveyNewHandler(w http.ResponseWriter, r *http.Request) {
 			date,
 			latitude,
 			longitude
-		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-		RETURNING id
-	`,
-		userID,
-		title,
-		location,
-		terrainType,
-		numberOfLayersInt,
-		geologicHistory,
-		previousWells,
-		surveyDate,
-		latitude,
-		longitude,
-	).Scan(&surveyID)
+		FROM surveys
+		WHERE id = $1 AND user_id = $2
+	`, surveyID, userID).Scan(
+		&survey.ID,
+		&survey.UserID,
+		&survey.Title,
+		&survey.Location,
+		&survey.TerrainType,
+		&survey.NumberOfLayersInt,
+		&survey.GeologicHistory,
+		&survey.PreviousWells,
+		&survey.Date,
+		&survey.Latitude,
+		&survey.Longitude,
+	)
 
 	if err != nil {
-		log.Println("survey save error:", err)
-		log.Printf("DEBUG values: userID=%d, title=%s, location=%s, terrain=%s, layers=%d\n",
-			userID, title, location, terrainType, numberOfLayersInt)
-		http.Error(w, "failed to save survey", http.StatusInternalServerError)
-		return
-	}
-
-	// =========================
-	// MEASUREMENT STORAGE
-	// =========================
-
-	var measurements []models.Measurement
-
-	// =========================
-	// CHECK FILE UPLOAD
-	// =========================
-	file, header, err := r.FormFile("survey_file")
-
-	// =====================================================
-	// FILE UPLOAD PATH (CSV / EXCEL)
-	// =====================================================
-	if err == nil && header != nil {
-
-		defer file.Close()
-
-		ext := strings.ToLower(filepath.Ext(header.Filename))
-
-		// =====================================================
-		// FILE PARSER (CSV + EXCEL + AUTO DETECT)
-		// =====================================================
-
-		switch ext {
-
-		// =====================================================
-		// CSV
-		// =====================================================
-
-		case ".csv":
-
-			reader := csv.NewReader(file)
-
-			records, err := reader.ReadAll()
-			if err != nil {
-				http.Error(w, "invalid csv file", http.StatusBadRequest)
-				return
-			}
-
-			if len(records) < 2 {
-				http.Error(w, "empty csv file", http.StatusBadRequest)
-				return
-			}
-
-			// =========================================
-			// DETECT COLUMN INDEXES
-			// =========================================
-
-			headerRow := records[0]
-
-			columnMap := map[string]int{}
-
-			for i, col := range headerRow {
-
-				col = strings.ToLower(strings.TrimSpace(col))
-
-				switch col {
-
-				case "ab2", "ab/2":
-					columnMap["ab2"] = i
-
-				case "mn2", "mn/2":
-					columnMap["mn2"] = i
-
-				case "resistance", "r":
-					columnMap["resistance"] = i
-
-				case "apparent_resistivity",
-					"apparent resistivity",
-					"rhoa",
-					"ρa":
-
-					columnMap["rhoa"] = i
-				}
-			}
-
-			_, hasAB2 := columnMap["ab2"]
-			_, hasMN2 := columnMap["mn2"]
-
-			if !hasAB2 || !hasMN2 {
-
-				http.Error(
-					w,
-					"csv must contain AB2 and MN2 columns",
-					http.StatusBadRequest,
-				)
-
-				return
-			}
-
-			// =========================================
-			// PARSE ROWS
-			// =========================================
-
-			for _, row := range records[1:] {
-
-				m := models.Measurement{}
-
-				// AB2
-				if idx, ok := columnMap["ab2"]; ok &&
-					idx < len(row) {
-
-					m.AB2, _ = strconv.ParseFloat(
-						strings.TrimSpace(row[idx]),
-						64,
-					)
-				}
-
-				// MN2
-				if idx, ok := columnMap["mn2"]; ok &&
-					idx < len(row) {
-
-					m.MN2, _ = strconv.ParseFloat(
-						strings.TrimSpace(row[idx]),
-						64,
-					)
-				}
-
-				// Resistance
-				if idx, ok := columnMap["resistance"]; ok &&
-					idx < len(row) {
-
-					m.Resistance, _ = strconv.ParseFloat(
-						strings.TrimSpace(row[idx]),
-						64,
-					)
-				}
-
-				// Apparent Resistivity
-				if idx, ok := columnMap["rhoa"]; ok &&
-					idx < len(row) {
-
-					m.ApparentResistivity, _ =
-						strconv.ParseFloat(
-							strings.TrimSpace(row[idx]),
-							64,
-						)
-				}
-
-				// AUTO COMPUTE RHOA
-				if m.ApparentResistivity == 0 &&
-					m.Resistance != 0 {
-
-					k := utils.CalculateK(
-						m.AB2,
-						m.MN2,
-					)
-
-					m.ApparentResistivity =
-						utils.CalculateRhoA(
-							k,
-							m.Resistance,
-						)
-				}
-
-				measurements = append(measurements, m)
-			}
-
-		// =====================================================
-		// EXCEL
-		// =====================================================
-
-		case ".xlsx", ".xls":
-
-			excelFile, err := excelize.OpenReader(file)
-			if err != nil {
-
-				http.Error(
-					w,
-					"invalid excel file",
-					http.StatusBadRequest,
-				)
-
-				return
-			}
-
-			sheetName := excelFile.GetSheetName(0)
-
-			rows, err := excelFile.GetRows(sheetName)
-			if err != nil {
-
-				http.Error(
-					w,
-					"failed to read excel file",
-					http.StatusInternalServerError,
-				)
-
-				return
-			}
-
-			if len(rows) < 2 {
-
-				http.Error(
-					w,
-					"empty excel file",
-					http.StatusBadRequest,
-				)
-
-				return
-			}
-
-			// =========================================
-			// DETECT COLUMN INDEXES
-			// =========================================
-
-			headerRow := rows[0]
-
-			columnMap := map[string]int{}
-
-			for i, col := range headerRow {
-
-				col = strings.ToLower(strings.TrimSpace(col))
-
-				switch col {
-
-				case "ab2", "ab/2":
-					columnMap["ab2"] = i
-
-				case "mn2", "mn/2":
-					columnMap["mn2"] = i
-
-				case "resistance", "r":
-					columnMap["resistance"] = i
-
-				case "apparent_resistivity",
-					"apparent resistivity",
-					"rhoa",
-					"ρa":
-
-					columnMap["rhoa"] = i
-				}
-			}
-
-			_, hasAB2 := columnMap["ab2"]
-			_, hasMN2 := columnMap["mn2"]
-
-			if !hasAB2 || !hasMN2 {
-
-				http.Error(
-					w,
-					"excel file must contain AB2 and MN2 columns",
-					http.StatusBadRequest,
-				)
-
-				return
-			}
-
-			// =========================================
-			// PARSE ROWS
-			// =========================================
-
-			for _, row := range rows[1:] {
-
-				m := models.Measurement{}
-
-				// AB2
-				if idx, ok := columnMap["ab2"]; ok &&
-					idx < len(row) {
-
-					m.AB2, _ = strconv.ParseFloat(
-						strings.TrimSpace(row[idx]),
-						64,
-					)
-				}
-
-				// MN2
-				if idx, ok := columnMap["mn2"]; ok &&
-					idx < len(row) {
-
-					m.MN2, _ = strconv.ParseFloat(
-						strings.TrimSpace(row[idx]),
-						64,
-					)
-				}
-
-				// Resistance
-				if idx, ok := columnMap["resistance"]; ok &&
-					idx < len(row) {
-
-					m.Resistance, _ = strconv.ParseFloat(
-						strings.TrimSpace(row[idx]),
-						64,
-					)
-				}
-
-				// Apparent Resistivity
-				if idx, ok := columnMap["rhoa"]; ok &&
-					idx < len(row) {
-
-					m.ApparentResistivity, _ =
-						strconv.ParseFloat(
-							strings.TrimSpace(row[idx]),
-							64,
-						)
-				}
-
-				// AUTO COMPUTE RHOA
-				if m.ApparentResistivity == 0 &&
-					m.Resistance != 0 {
-
-					k := utils.CalculateK(
-						m.AB2,
-						m.MN2,
-					)
-
-					m.ApparentResistivity =
-						utils.CalculateRhoA(
-							k,
-							m.Resistance,
-						)
-				}
-
-				measurements = append(measurements, m)
-			}
-
-		default:
-
-			http.Error(
-				w,
-				"unsupported file type",
-				http.StatusBadRequest,
-			)
-
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "Survey not found", http.StatusNotFound)
 			return
 		}
 
-	} else {
-
-		// =====================================================
-		// MANUAL INPUT PATH
-		// =====================================================
-
-		ab2Vals := r.Form["ab2[]"]
-
-		mn2Vals := r.Form["mn2[]"]
-
-		resistanceVals := r.Form["resistance[]"]
-
-		rhoaVals := r.Form["apparent_resistivity[]"]
-
-		if len(ab2Vals) == 0 {
-
-			http.Error(
-				w,
-				"provide CSV/Excel upload or manual measurements",
-				http.StatusBadRequest,
-			)
-
-			return
-		}
-
-		for i := range ab2Vals {
-
-			if strings.TrimSpace(ab2Vals[i]) == "" {
-				continue
-			}
-
-			m := models.Measurement{}
-
-			m.AB2, _ = strconv.ParseFloat(
-				strings.TrimSpace(ab2Vals[i]),
-				64,
-			)
-
-			if i < len(mn2Vals) {
-
-				m.MN2, _ = strconv.ParseFloat(
-					strings.TrimSpace(mn2Vals[i]),
-					64,
-				)
-			}
-
-			if i < len(resistanceVals) &&
-				strings.TrimSpace(resistanceVals[i]) != "" {
-
-				m.Resistance, _ = strconv.ParseFloat(
-					strings.TrimSpace(resistanceVals[i]),
-					64,
-				)
-			}
-
-			if i < len(rhoaVals) &&
-				strings.TrimSpace(rhoaVals[i]) != "" {
-
-				m.ApparentResistivity, _ =
-					strconv.ParseFloat(
-						strings.TrimSpace(rhoaVals[i]),
-						64,
-					)
-			}
-
-			// AUTO COMPUTE RHOA
-			if m.ApparentResistivity == 0 &&
-				m.Resistance != 0 {
-
-				k := utils.CalculateK(
-					m.AB2,
-					m.MN2,
-				)
-
-				m.ApparentResistivity =
-					utils.CalculateRhoA(
-						k,
-						m.Resistance,
-					)
-			}
-
-			measurements = append(measurements, m)
-		}
-		// SAVE ALL MEASUREMENTS TO DATABASE
-		fmt.Println("Total measurements to save:", len(measurements))
-
-		for _, m := range measurements {
-			_, err = database.DB.Exec(`
-        INSERT INTO measurements (
-            survey_id,
-            ab2,
-            mn2,
-            resistance,
-            apparent_resistivity
-        )
-        VALUES ($1,$2,$3,$4,$5)
-    `,
-				surveyID,
-				m.AB2,
-				m.MN2,
-				m.Resistance,
-				m.ApparentResistivity,
-			)
-			if err != nil {
-				fmt.Println("Measurement insert error:", err)
-				http.Error(w, "failed to save measurements", http.StatusInternalServerError)
-				return
-			}
-		}
-
-		// REDIRECT AFTER SAVING
-		http.Redirect(
+		log.Printf("Failed to retrieve survey %d: %v", surveyID, err)
+		http.Error(
 			w,
-			r,
-			"/survey/"+strconv.Itoa(surveyID)+"/results",
-			http.StatusSeeOther,
+			"Failed to retrieve survey",
+			http.StatusInternalServerError,
 		)
 		return
+	}
 
+	// 4. Retrieve the survey's measurements.
+	rows, err := database.DB.Query(`
+		SELECT
+			ab2,
+			mn2,
+			resistance,
+			apparent_resistivity
+		FROM measurements
+		WHERE survey_id = $1
+		ORDER BY ab2 ASC
+	`, surveyID)
+
+	if err != nil {
+		log.Printf("Failed to retrieve measurements for survey %d: %v",
+			surveyID, err)
+		http.Error(
+			w,
+			"Failed to retrieve survey measurements",
+			http.StatusInternalServerError,
+		)
+		return
+	}
+	defer rows.Close()
+
+	measurements := make([]models.Measurement, 0)
+
+	for rows.Next() {
+		var m models.Measurement
+
+		if err := rows.Scan(
+			&m.AB2,
+			&m.MN2,
+			&m.Resistance,
+			&m.ApparentResistivity,
+		); err != nil {
+			log.Printf("Failed to scan measurement: %v", err)
+			http.Error(
+				w,
+				"Failed to read survey measurements",
+				http.StatusInternalServerError,
+			)
+			return
+		}
+
+		measurements = append(measurements, m)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over measurements: %v", err)
+		http.Error(
+			w,
+			"Failed to read survey measurements",
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
+	// 5. Pass the survey and measurements to the template.
+	pageData := struct {
+		Survey       models.Survey
+		Measurements []models.Measurement
+	}{
+		Survey:       survey,
+		Measurements: measurements,
+	}
+
+	tmpl, err := template.ParseFiles("template/survey.html")
+	if err != nil {
+		log.Printf("Failed to parse survey template: %v", err)
+		http.Error(
+			w,
+			"Failed to load survey page",
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if err := tmpl.Execute(w, pageData); err != nil {
+		log.Printf("Failed to render survey %d: %v", surveyID, err)
 	}
 }
-
-func SurveyHandler(w http.ResponseWriter, r *http.Request) {
-}
-
-// type SurveyResultPage struct {
-// 	Survey            models.Survey
-// 	Measurements      []models.Measurement
-// 	NumberOfLayersInt int
-// 	GraphJSON         template.JS
-// }
-
-// func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
-// 	// 1. Authenticate the user.
-// 	userVal := r.Context().Value(utils.UserContextKey)
-// 	if userVal == nil {
-// 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-// 		return
-// 	}
-
-// 	userID, ok := userVal.(int)
-// 	if !ok {
-// 		http.Error(w, "invalid user context", http.StatusUnauthorized)
-// 		return
-// 	}
-
-// 	// 2. Read the survey ID.
-// 	vars := mux.Vars(r)
-// 	idStr := vars["id"]
-
-// 	if idStr == "" {
-// 		http.Error(w, "missing survey id", http.StatusBadRequest)
-// 		return
-// 	}
-
-// 	surveyID, err := strconv.Atoi(idStr)
-// 	if err != nil {
-// 		http.Error(w, "invalid survey id", http.StatusBadRequest)
-// 		return
-// 	}
-
-// 	// 3. Fetch the survey belonging to this user.
-// 	var survey models.Survey
-
-// 	err = database.DB.QueryRow(`
-// 		SELECT
-// 			id,
-// 			title,
-// 			location,
-// 			terrain_type,
-// 			number_of_layers,
-// 			geologic_history,
-// 			previous_wells,
-// 			date,
-// 			latitude,
-// 			longitude
-// 		FROM surveys
-// 		WHERE id = $1 AND user_id = $2
-// 	`, surveyID, userID).Scan(
-// 		&survey.ID,
-// 		&survey.Title,
-// 		&survey.Location,
-// 		&survey.TerrainType,
-// 		&survey.NumberOfLayersInt,
-// 		&survey.GeologicHistory,
-// 		&survey.PreviousWells,
-// 		&survey.Date,
-// 		&survey.Latitude,
-// 		&survey.Longitude,
-// 	)
-
-// 	if err != nil {
-// 		log.Printf("Failed to fetch survey %d: %v", surveyID, err)
-// 		http.Error(w, "survey not found", http.StatusNotFound)
-// 		return
-// 	}
-
-// 	// 4. Fetch the measurements.
-// 	rows, err := database.DB.Query(`
-// 		SELECT
-// 			ab2,
-// 			mn2,
-// 			resistance,
-// 			apparent_resistivity
-// 		FROM measurements
-// 		WHERE survey_id = $1
-// 		ORDER BY ab2 ASC
-// 	`, surveyID)
-// 	if err != nil {
-// 		log.Printf("Failed to fetch measurements: %v", err)
-// 		http.Error(
-// 			w,
-// 			"failed to fetch measurements",
-// 			http.StatusInternalServerError,
-// 		)
-// 		return
-// 	}
-
-// 	var measurements []models.Measurement
-
-// 	for rows.Next() {
-// 		var m models.Measurement
-
-// 		if err := rows.Scan(
-// 			&m.AB2,
-// 			&m.MN2,
-// 			&m.Resistance,
-// 			&m.ApparentResistivity,
-// 		); err != nil {
-// 			rows.Close()
-// 			log.Printf("Failed to scan measurement: %v", err)
-// 			http.Error(
-// 				w,
-// 				"failed to read measurements",
-// 				http.StatusInternalServerError,
-// 			)
-// 			return
-// 		}
-
-// 		measurements = append(measurements, m)
-// 	}
-
-// 	if err := rows.Err(); err != nil {
-// 		rows.Close()
-// 		log.Printf("Measurement iteration failed: %v", err)
-// 		http.Error(
-// 			w,
-// 			"failed to read measurements",
-// 			http.StatusInternalServerError,
-// 		)
-// 		return
-// 	}
-
-// 	if err := rows.Close(); err != nil {
-// 		log.Printf("Failed to close measurement rows: %v", err)
-// 	}
-
-// 	if len(measurements) == 0 {
-// 		http.Error(w, "no measurements found for this survey", http.StatusBadRequest)
-// 		return
-// 	}
-
-// 	log.Printf(
-// 		"Survey %d: loaded %d raw measurements",
-// 		surveyID,
-// 		len(measurements),
-// 	)
-
-// 	// 5. Average repeated AB/2 measurements.
-// 	// This function should return one measurement per AB/2,
-// 	// with the averaged apparent resistivity.
-// 	measurements = utils.AverageRepeatedAB2(measurements)
-
-// 	if len(measurements) == 0 {
-// 		http.Error(w, "no valid measurements available", http.StatusBadRequest)
-// 		return
-// 	}
-
-// 	// 6. Build the observed curve data.
-// 	ab2Values := make([]float64, 0, len(measurements))
-// 	rhoaValues := make([]float64, 0, len(measurements))
-
-// 	for _, m := range measurements {
-// 		ab2Values = append(ab2Values, m.AB2)
-// 		rhoaValues = append(rhoaValues, m.ApparentResistivity)
-// 	}
-
-// 	// Leave computed empty unless a model is successfully fitted.
-// 	var computedRhoa []float64
-
-// 	// 7. Use the layer count saved with the survey.
-// 	layerCount := survey.NumberOfLayersInt
-
-// 	if layerCount < 1 {
-// 		log.Printf(
-// 			"Survey %d has invalid saved layer count: %d",
-// 			surveyID,
-// 			layerCount,
-// 		)
-// 	} else if len(measurements) < layerCount+1 {
-// 		log.Printf(
-// 			"Survey %d: %d measurements are insufficient to fit %d layers",
-// 			surveyID,
-// 			len(measurements),
-// 			layerCount,
-// 		)
-// 	} else {
-// 		// 8. Detect candidate boundaries.
-// 		boundaries, boundaryErr := utils.DetectLayersN(
-// 			measurements,
-// 			layerCount,
-// 		)
-
-// 		if boundaryErr != nil {
-// 			log.Printf(
-// 				"Survey %d: boundary detection failed: %v",
-// 				surveyID,
-// 				boundaryErr,
-// 			)
-// 		} else {
-// 			// 9. Classify the observed curve.
-// 			curveType := utils.DetermineCurveType(
-// 				boundaries,
-// 				measurements,
-// 			)
-
-// 			log.Printf(
-// 				"Survey %d: observed curve classification = %s",
-// 				surveyID,
-// 				curveType,
-// 			)
-
-// 			// 10. Fit the model against ALL valid measurements.
-// 			fit, fitErr := utils.FitLayerModel(
-// 				measurements,
-// 				boundaries,
-// 				layerCount,
-// 			)
-
-// 			if fitErr != nil {
-// 				log.Printf(
-// 					"Survey %d: model fitting failed: %v",
-// 					surveyID,
-// 					fitErr,
-// 				)
-// 			} else if len(fit.Computed) != len(ab2Values) {
-// 				log.Printf(
-// 					"Survey %d: fitted curve length (%d) does not match observations (%d)",
-// 					surveyID,
-// 					len(fit.Computed),
-// 					len(ab2Values),
-// 				)
-// 			} else {
-// 				// Use the fitted forward-model response.
-// 				// Do NOT call BuildLayerModel here.
-// 				computedRhoa = fit.Computed
-
-// 				log.Printf(
-// 					"Survey %d: fitted resistivities = %v",
-// 					surveyID,
-// 					fit.Resistivities,
-// 				)
-// 				log.Printf(
-// 					"Survey %d: fitted thicknesses = %v",
-// 					surveyID,
-// 					fit.Thicknesses,
-// 				)
-// 				log.Printf(
-// 					"Survey %d: RMS log-resistivity error = %.6f",
-// 					surveyID,
-// 					fit.RMSLogError,
-// 				)
-// 			}
-// 		}
-// 	}
-// 	metrics, err := utils.CalculateFitMetrics(
-// 		rhoaValues,
-// 		computedRhoa,
-// 	)
-// 	if err != nil {
-// 		log.Printf("Unable to calculate fit metrics: %v", err)
-// 	} else {
-// 		log.Printf(
-// 			"VES fit: points=%d logRMS=%.5f RMS%%=%.2f MAE%%=%.2f MaxAE%%=%.2f",
-// 			metrics.Points,
-// 			metrics.LogRMS,
-// 			metrics.RMSPercent,
-// 			metrics.MeanAbsolutePercent,
-// 			metrics.MaxAbsolutePercent,
-// 		)
-// 	}
-// 	// 11. Build graph JSON.
-// 	graphData := map[string]interface{}{
-// 		"ab2":      ab2Values,
-// 		"rhoa":     rhoaValues,
-// 		"computed": computedRhoa,
-// 	}
-
-// 	graphJSON, err := json.Marshal(graphData)
-// 	if err != nil {
-// 		log.Printf("Failed to build graph JSON: %v", err)
-// 		http.Error(
-// 			w,
-// 			"failed to build graph data",
-// 			http.StatusInternalServerError,
-// 		)
-// 		return
-// 	}
-
-// 	// 12. Prepare the template data.
-// 	pageData := SurveyResultPage{
-// 		Survey:       survey,
-// 		Measurements: measurements,
-// 		GraphJSON:    template.JS(string(graphJSON)),
-// 	}
-
-// 	// 13. Render the results page.
-// 	tmpl, err := template.ParseFiles("template/surveyresult.html")
-// 	if err != nil {
-// 		log.Printf("Failed to load survey results template: %v", err)
-// 		http.Error(
-// 			w,
-// 			"failed to load page",
-// 			http.StatusInternalServerError,
-// 		)
-// 		return
-// 	}
-
-// 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-// 	if err := tmpl.Execute(w, pageData); err != nil {
-// 		log.Printf("Failed to render survey results: %v", err)
-// 	}
-// }
 
 type SurveyResultPage struct {
 	Survey            models.Survey
@@ -1264,132 +710,139 @@ func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 9. Fit the number of layers saved with the survey.
 	// This remains the model displayed by the existing results page.
+	// A non-positive layer count must stop this branch: otherwise the
+	// minimum-measurement check can pass with an invalid model request.
 	layerCount := survey.NumberOfLayersInt
 
-	if layerCount < 1 {
+	if layerCount < 2 {
 		log.Printf(
-			"Survey %d has invalid saved layer count: %d",
+			"Survey %d has invalid saved layer count %d; skipping inversion",
 			surveyID,
-			layerCount,
-		)
-	} else if len(measurements) < layerCount+1 {
-		log.Printf(
-			"Survey %d: %d unique measurements may be insufficient to fit %d layers",
-			surveyID,
-			len(measurements),
 			layerCount,
 		)
 	} else {
-		boundaries, boundaryErr := utils.DetectLayersN(
-			measurements,
-			layerCount,
-		)
+		minimumMeasurements := 2*layerCount - 1
 
-		if boundaryErr != nil {
+		if len(measurements) < minimumMeasurements {
 			log.Printf(
-				"Survey %d: automatic boundary detection failed: %v",
+				"Survey %d: need at least %d measurements to fit %d layers; got %d",
 				surveyID,
-				boundaryErr,
-			)
-
-			boundaries = initialVESBoundaries(
-				measurements,
+				minimumMeasurements,
 				layerCount,
-			)
-
-			log.Printf(
-				"Survey %d: generated %d fallback initialization boundaries",
-				surveyID,
-				len(boundaries),
-			)
-		}
-
-		requiredBoundaries := layerCount - 1
-
-		if len(boundaries) != requiredBoundaries {
-			log.Printf(
-				"Survey %d: cannot initialize inversion; have %d boundaries, need %d",
-				surveyID,
-				len(boundaries),
-				requiredBoundaries,
+				len(measurements),
 			)
 		} else {
-			curveType := utils.DetermineCurveType(
-				boundaries,
+			boundaries, boundaryErr := utils.DetectLayersN(
 				measurements,
-			)
-
-			log.Printf(
-				"Survey %d: observed curve classification = %s",
-				surveyID,
-				curveType,
-			)
-
-			fit, fitErr := utils.FitLayerModel(
-				measurements,
-				boundaries,
 				layerCount,
 			)
 
-			if fitErr != nil {
+			if boundaryErr != nil {
 				log.Printf(
-					"Survey %d: model fitting failed: %v",
+					"Survey %d: automatic boundary detection failed: %v",
 					surveyID,
-					fitErr,
+					boundaryErr,
 				)
-			} else if len(fit.Computed) != len(rhoaValues) {
+
+				boundaries = initialVESBoundaries(
+					measurements,
+					layerCount,
+				)
+
 				log.Printf(
-					"Survey %d: fitted curve length (%d) does not match observations (%d)",
+					"Survey %d: generated %d fallback initialization boundaries",
 					surveyID,
-					len(fit.Computed),
-					len(rhoaValues),
+					len(boundaries),
+				)
+			}
+
+			requiredBoundaries := layerCount - 1
+
+			if len(boundaries) != requiredBoundaries {
+				log.Printf(
+					"Survey %d: cannot initialize inversion; have %d boundaries, need %d",
+					surveyID,
+					len(boundaries),
+					requiredBoundaries,
 				)
 			} else {
-				validFit := true
+				curveType := utils.DetermineCurveType(
+					boundaries,
+					measurements,
+				)
 
-				for _, value := range fit.Computed {
-					if !positiveFinite(value) {
-						validFit = false
-						break
-					}
-				}
+				log.Printf(
+					"Survey %d: observed curve classification = %s",
+					surveyID,
+					curveType,
+				)
 
-				if !validFit {
+				fit, fitErr := utils.FitLayerModel(
+					measurements,
+					boundaries,
+					layerCount,
+				)
+
+				if fitErr != nil {
 					log.Printf(
-						"Survey %d: fitted curve contains non-positive or non-finite values",
+						"Survey %d: model fitting failed: %v",
 						surveyID,
+						fitErr,
 					)
-				} else if len(fit.Resistivities) != layerCount ||
-					len(fit.Thicknesses) != layerCount-1 {
+				} else if len(fit.Computed) != len(rhoaValues) {
 					log.Printf(
-						"Survey %d: fitted model has unexpected parameter counts: resistivities=%d thicknesses=%d",
+						"Survey %d: fitted curve length (%d) does not match observations (%d)",
 						surveyID,
-						len(fit.Resistivities),
-						len(fit.Thicknesses),
+						len(fit.Computed),
+						len(rhoaValues),
 					)
 				} else {
-					computedRhoa = append(
-						[]float64(nil),
-						fit.Computed...,
-					)
+					validFit := true
 
-					log.Printf(
-						"Survey %d: fitted resistivities = %v",
-						surveyID,
-						fit.Resistivities,
-					)
+					for _, value := range fit.Computed {
+						if !positiveFinite(value) {
+							validFit = false
+							break
+						}
+					}
 
-					log.Printf(
-						"Survey %d: fitted thicknesses = %v",
-						surveyID,
-						fit.Thicknesses,
-					)
+					if !validFit {
+						log.Printf(
+							"Survey %d: fitted curve contains non-positive or non-finite values",
+							surveyID,
+						)
+					} else if len(fit.Resistivities) != layerCount ||
+						len(fit.Thicknesses) != layerCount-1 {
+						log.Printf(
+							"Survey %d: fitted model has unexpected parameter counts: resistivities=%d thicknesses=%d",
+							surveyID,
+							len(fit.Resistivities),
+							len(fit.Thicknesses),
+						)
+					} else {
+						computedRhoa = append(
+							[]float64(nil),
+							fit.Computed...,
+						)
 
-					log.Printf(
-						"Survey %d: optimizer RMS log-resistivity error = %.6f",
-						surveyID,
-						fit.RMSLogError,
-					)
+						log.Printf(
+							"Survey %d: fitted resistivities = %v",
+							surveyID,
+							fit.Resistivities,
+						)
+
+						log.Printf(
+							"Survey %d: fitted thicknesses = %v",
+							surveyID,
+							fit.Thicknesses,
+						)
+
+						log.Printf(
+							"Survey %d: optimizer RMS log-resistivity error = %.6f",
+							surveyID,
+							fit.RMSLogError,
+						)
+					}
 				}
 			}
 		}
@@ -1773,4 +1226,319 @@ func SurveyEditHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func SurveysHandler(w http.ResponseWriter, r *http.Request) {
+	// Only allow GET requests.
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Get the authenticated user's ID.
+	userID, ok := r.Context().Value(utils.UserContextKey).(int)
+	if !ok || userID <= 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// 2. Retrieve only this user's surveys.
+	rows, err := database.DB.Query(`
+		SELECT
+			id,
+			title,
+			location,
+			terrain_type,
+			number_of_layers,
+			geologic_history,
+			previous_wells,
+			date,
+			latitude,
+			longitude
+		FROM surveys
+		WHERE user_id = $1
+		ORDER BY date DESC, id DESC
+	`, userID)
+
+	if err != nil {
+		log.Printf("Failed to retrieve surveys for user %d: %v",
+			userID, err)
+		http.Error(
+			w,
+			"Failed to retrieve surveys",
+			http.StatusInternalServerError,
+		)
+		return
+	}
+	defer rows.Close()
+
+	surveys := make([]models.Survey, 0)
+
+	// 3. Scan each row into a Survey model.
+	for rows.Next() {
+		var survey models.Survey
+
+		if err := rows.Scan(
+			&survey.ID,
+			&survey.Title,
+			&survey.Location,
+			&survey.TerrainType,
+			&survey.NumberOfLayersInt,
+			&survey.GeologicHistory,
+			&survey.PreviousWells,
+			&survey.Date,
+			&survey.Latitude,
+			&survey.Longitude,
+		); err != nil {
+			log.Printf("Failed to scan survey: %v", err)
+			http.Error(
+				w,
+				"Failed to read surveys",
+				http.StatusInternalServerError,
+			)
+			return
+		}
+
+		surveys = append(surveys, survey)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over surveys: %v", err)
+		http.Error(
+			w,
+			"Failed to read surveys",
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
+	// 4. Render the survey list.
+	tmpl, err := template.ParseFiles("template/surveys.html")
+	if err != nil {
+		log.Printf("Failed to parse surveys template: %v", err)
+		http.Error(
+			w,
+			"Failed to load surveys page",
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if err := tmpl.Execute(w, surveys); err != nil {
+		log.Printf("Failed to render surveys page: %v", err)
+	}
+}
+
+// These are view models for resultedit.html.
+// Adapt them to your existing models if equivalent types already exist.
+
+type ResultEditPageData struct {
+	Survey  ResultEditSurvey
+	Model   ResultEditModel
+	Results ResultEditMetadata
+}
+
+type ResultEditSurvey struct {
+	ID       int
+	Title    string
+	Location string
+}
+
+type ResultEditModel struct {
+	NumberOfLayers int
+	Layers         []ResultEditLayer
+}
+
+type ResultEditLayer struct {
+	Resistivity   float64
+	Thickness     float64
+	IsBottomLayer bool
+}
+
+type ResultEditMetadata struct {
+	InterpretationName string
+	Notes              string
+	LogRMS             float64
+	Status             string
+}
+
+func ResultEditHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Assumes your authentication middleware stores an int user ID.
+	userID, ok := r.Context().Value(utils.UserContextKey).(int)
+	if !ok || userID <= 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	idText := mux.Vars(r)["id"]
+	surveyID, err := strconv.Atoi(idText)
+	if err != nil || surveyID <= 0 {
+		http.Error(w, "Invalid survey ID", http.StatusBadRequest)
+		return
+	}
+
+	// Replace database.DB with your actual *sql.DB variable.
+	// This query assumes an interpretations table linked to surveys.
+	var data ResultEditPageData
+
+	err = database.DB.QueryRowContext(r.Context(), `
+		SELECT
+			s.id,
+			s.title,
+			s.location,
+			i.id,
+			i.interpretation_name,
+			COALESCE(i.notes, ''),
+			COALESCE(i.log_rms, 0),
+			COALESCE(i.status, 'saved')
+		FROM surveys s
+		JOIN interpretations i ON i.survey_id = s.id
+		WHERE s.id = $1
+		  AND s.user_id = $2
+		ORDER BY i.id DESC
+		LIMIT 1
+	`, surveyID, userID).Scan(
+		&data.Survey.ID,
+		&data.Survey.Title,
+		&data.Survey.Location,
+		new(int), // Interpretation ID; use a field if needed by your update handler.
+		&data.Results.InterpretationName,
+		&data.Results.Notes,
+		&data.Results.LogRMS,
+		&data.Results.Status,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "Survey or interpretation not found", http.StatusNotFound)
+			return
+		}
+
+		http.Error(w, "Could not load interpretation", http.StatusInternalServerError)
+		return
+	}
+
+	// Load the layer parameters for the selected interpretation.
+	// The query assumes interpretation_layers has an interpretation_id column.
+	// In production, retain the interpretation ID from the previous query
+	// and use it here instead of querying by survey alone.
+	//
+	// See the note below before using this example unchanged.
+
+	tmpl, err := template.ParseFiles("template/resultedit.html")
+	if err != nil {
+		http.Error(w, "Could not load edit page", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tmpl.Execute(w, data); err != nil {
+		// Log the error server-side; avoid writing a second HTTP response.
+		return
+	}
+}
+func ResultUpdateHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, ok := r.Context().Value(utils.UserContextKey).(int)
+	if !ok || userID <= 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	surveyID, err := strconv.Atoi(mux.Vars(r)["id"])
+	if err != nil || surveyID <= 0 {
+		http.Error(w, "Invalid survey ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+
+	action := r.FormValue("action")
+	if action != "save" && action != "recalculate" {
+		http.Error(w, "Invalid action", http.StatusBadRequest)
+		return
+	}
+
+	// Do not pretend that saving parameters recalculates the model.
+	// Implement recalculation through your actual forward-model/inversion
+	// service before accepting the "recalculate" action.
+	if action == "recalculate" {
+		http.Error(
+			w,
+			"Recalculation service must be implemented before this action is available",
+			http.StatusNotImplemented,
+		)
+		return
+	}
+
+	resistivities := r.Form["resistivity[]"]
+	thicknesses := r.Form["thickness[]"]
+
+	if len(resistivities) == 0 || len(resistivities) != len(thicknesses) {
+		http.Error(w, "Invalid layer data", http.StatusBadRequest)
+		return
+	}
+
+	type LayerInput struct {
+		Resistivity float64
+		Thickness   float64
+	}
+
+	layers := make([]LayerInput, len(resistivities))
+
+	for i := range resistivities {
+		rho, err := strconv.ParseFloat(resistivities[i], 64)
+		if err != nil || rho <= 0 {
+			http.Error(
+				w,
+				"Each layer resistivity must be a positive number",
+				http.StatusBadRequest,
+			)
+			return
+		}
+
+		layers[i].Resistivity = rho
+
+		// The final layer represents a half-space, so its thickness
+		// should not be submitted as a finite value.
+		if i == len(resistivities)-1 {
+			continue
+		}
+
+		thickness, err := strconv.ParseFloat(thicknesses[i], 64)
+		if err != nil || thickness <= 0 {
+			http.Error(
+				w,
+				"Finite-layer thicknesses must be positive numbers",
+				http.StatusBadRequest,
+			)
+			return
+		}
+
+		layers[i].Thickness = thickness
+	}
+
+	// TODO: persist the validated parameters in a database transaction.
+	// First verify that surveyID belongs to userID and identify the exact
+	// interpretation being edited. Update its layer rows only after that
+	// ownership check succeeds.
+	//
+	// Also persist the interpretation name and notes if those fields are
+	// editable in your template.
+
+	http.Redirect(
+		w,
+		r,
+		"/survey/"+strconv.Itoa(surveyID)+"/results",
+		http.StatusSeeOther,
+	)
 }

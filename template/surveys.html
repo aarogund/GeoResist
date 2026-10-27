@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Surveys | GeoResist</title>
+<style>
+:root{--navy:#12304a;--blue:#1769aa;--text:#243447;--muted:#637487;--border:#dbe3eb;--bg:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 Arial,Helvetica,sans-serif}
+header{background:var(--navy);color:white;padding:18px 5%}.wrap{max-width:1120px;margin:auto}.brand{font-size:1.25rem;font-weight:bold}.brand span{color:#7ed6b0}
+nav{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px}nav a{color:#e8f2fa;text-decoration:none}
+main{max-width:1120px;margin:auto;padding:28px 20px 48px}.heading{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+h1{margin:0 0 5px;color:var(--navy);font-size:clamp(1.6rem,3vw,2.1rem)}.subtitle,.muted{color:var(--muted)}
+.card{background:white;border:1px solid var(--border);border-radius:12px;padding:22px;box-shadow:0 3px 12px #12304a0a;margin-top:22px}
+.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:760px}th,td{padding:13px 14px;text-align:left;border-bottom:1px solid var(--border)}
+th{background:#f0f5fa;color:var(--navy);font-size:.88rem}tbody tr:hover{background:#f8fbfe}
+a{color:var(--blue)}.survey-title{font-weight:bold;text-decoration:none}.survey-title:hover{text-decoration:underline}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 15px;border-radius:7px;font-weight:bold;text-decoration:none;border:1px solid transparent;white-space:nowrap}
+.primary{background:var(--blue);color:white}.primary:hover{background:#10588f}.empty{text-align:center;padding:42px 20px}.empty h2{color:var(--navy);margin:0 0 8px}.empty p{color:var(--muted);margin:0 0 20px}
+footer{text-align:center;color:var(--muted);font-size:.85rem;padding:18px}@media(max-width:600px){main{padding:22px 14px 36px}.card{padding:14px}th,td{padding:10px}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+<div class="brand">Geo<span>Resist</span></div>
+<nav aria-label="Main navigation"><a href="/dashboard">Dashboard</a><a href="/surveys" aria-current="page">My Surveys</a><a href="/survey/new">New Survey</a></nav>
+</div></header>
+<main>
+<div class="heading"><div><h1>My surveys</h1><p class="subtitle">Manage your vertical electrical sounding (VES) surveys.</p></div><a class="btn primary" href="/survey/new">+ Create survey</a></div>
+<section class="card" aria-label="Survey list">
+{{if .}}
+<div class="table-wrap"><table>
+<thead><tr><th>Survey</th><th>Location</th><th>Terrain</th><th>Layers</th><th>Survey date</th><th>Coordinates</th><th>Action</th></tr></thead>
+<tbody>{{range .}}<tr>
+<td><a class="survey-title" href="/survey/{{.ID}}">{{.Title}}</a><div class="muted">ID: {{.ID}}</div></td>
+<td>{{if .Location}}{{.Location}}{{else}}<span class="muted">Not provided</span>{{end}}</td>
+<td>{{if .TerrainType}}{{.TerrainType}}{{else}}<span class="muted">Not specified</span>{{end}}</td>
+<td>{{.NumberOfLayersInt}}</td>
+<td>{{.Date.Format "02 Jan 2006"}}</td>
+<td>{{.Latitude}}, {{.Longitude}}</td>
+<td><a href="/survey/{{.ID}}">Open →</a></td>
+</tr>{{end}}</tbody>
+</table></div>
+{{else}}
+<div class="empty"><h2>No surveys yet</h2><p>Create your first VES survey to store field measurements and interpret apparent resistivity data.</p><a class="btn primary" href="/survey/new">Create your first survey</a></div>
+{{end}}
+</section>
+</main>
+<footer>GeoResist — Electrical Resistivity Survey Platform</footer>
+</body>
+</html>

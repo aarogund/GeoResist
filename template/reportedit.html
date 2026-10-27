@@ -1,0 +1,70 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Edit Report | GeoResist</title>
+    <style>
+        body{font:16px/1.6 Arial,sans-serif;background:#f4f7fb;color:#243447}
+        main{max-width:900px;margin:30px auto;padding:20px}
+        section{background:white;padding:26px;border:1px solid #dbe3eb;border-radius:10px}
+        label{display:block;font-weight:bold;margin:16px 0 6px}
+        input,textarea,select{box-sizing:border-box;width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}
+        textarea{min-height:100px;resize:vertical}
+        button,.btn{display:inline-block;padding:11px 16px;border:0;border-radius:6px;background:#1769aa;color:white;text-decoration:none;cursor:pointer;font:inherit}
+        .error{background:#fff0f0;color:#9b1c1c;padding:12px;border-radius:6px}
+    </style>
+</head>
+<body>
+<main>
+    <p><a href="/survey/{{.SurveyID}}/results">← Back to survey results</a></p>
+    <section>
+        <h1>Edit Geophysical Report</h1>
+        <p><strong>Survey:</strong> {{.SurveyTitle}}</p>
+        <p><strong>Location:</strong> {{.Location}}</p>
+
+        {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+        <form method="POST" action="/report/{{.SurveyID}}/edit">
+            <label for="introduction">Introduction *</label>
+            <textarea id="introduction" name="introduction" required>{{.Report.Introduction}}</textarea>
+
+            <label for="executive_summary">Executive Summary *</label>
+            <textarea id="executive_summary" name="executive_summary" required>{{.Report.ExecutiveSummary}}</textarea>
+
+            <label for="local_geology">Local Geology</label>
+            <textarea id="local_geology" name="local_geology">{{.Report.LocalGeology}}</textarea>
+
+            <label for="methodology">Methodology</label>
+            <textarea id="methodology" name="methodology">{{.Report.Methodology}}</textarea>
+
+            <label for="results">Results</label>
+            <textarea id="results" name="results">{{.Report.Results}}</textarea>
+
+            <label for="discussion">Discussion</label>
+            <textarea id="discussion" name="discussion">{{.Report.Discussion}}</textarea>
+
+            <label for="recommendations">Recommendations</label>
+            <textarea id="recommendations" name="recommendations">{{.Report.Recommendations}}</textarea>
+
+            <label for="drill_depth">Recommended Drill Depth (metres)</label>
+            <input id="drill_depth" name="drill_depth" type="number"
+                   min="0" step="0.01" value="{{.Report.DrillDepth}}">
+
+            <label for="aquifer_detected">Aquifer detected?</label>
+            <select id="aquifer_detected" name="aquifer_detected">
+                <option value="false" {{if not .Report.AquiferDetected}}selected{{end}}>No / not confirmed</option>
+                <option value="true" {{if .Report.AquiferDetected}}selected{{end}}>Yes</option>
+            </select>
+
+            <p>
+                <button type="submit">Save Changes</button>
+                <a class="btn" href="/report/{{.SurveyID}}/export">Export Report</a>
+                <a class="btn" href="/report/{{.SurveyID}}/share">Share</a>
+            </p>
+        </form>
+    </section>
+</main>
+</body>
+</html>

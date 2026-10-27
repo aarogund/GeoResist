@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Survey.Title}} | GeoResist</title>
+<style>
+:root{--navy:#12304a;--blue:#1769aa;--green:#16835d;--text:#243447;--muted:#637487;--border:#dbe3eb;--bg:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 Arial,Helvetica,sans-serif}
+header{background:var(--navy);color:#fff;padding:18px 5%}.wrap{max-width:1120px;margin:auto}.brand{font-size:1.25rem;font-weight:bold}.brand span{color:#7ed6b0}
+nav{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px}nav a{color:#e8f2fa;text-decoration:none}
+main{max-width:1120px;margin:auto;padding:28px 20px 48px}.heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+h1{margin:0 0 5px;color:var(--navy);font-size:clamp(1.6rem,3vw,2.1rem)}h2{margin:0 0 16px;color:var(--navy);font-size:1.15rem}.muted,.subtitle{color:var(--muted)}
+.card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:22px;margin:20px 0;box-shadow:0 3px 12px #12304a0a}
+.details{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px 24px;margin:0}dt{color:var(--muted);font-size:.83rem;margin-bottom:4px}dd{margin:0;font-weight:600;overflow-wrap:anywhere}
+.prose{white-space:pre-wrap;overflow-wrap:anywhere;margin:0}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:650px}
+th,td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--border)}th{background:#f0f5fa;color:var(--navy);font-size:.88rem}tbody tr:hover{background:#f8fbfe}
+.numeric{font-variant-numeric:tabular-nums}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 15px;border-radius:7px;font-weight:bold;text-decoration:none;border:1px solid var(--border)}
+.primary{background:var(--blue);border-color:var(--blue);color:white}.primary:hover{background:#10588f}.secondary{background:white;color:var(--navy)}.secondary:hover{background:#eaf4fc}
+footer{text-align:center;color:var(--muted);font-size:.85rem;padding:18px}@media(max-width:600px){main{padding:22px 14px 36px}.card{padding:16px}th,td{padding:10px}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+<div class="brand">Geo<span>Resist</span></div>
+<nav aria-label="Main navigation"><a href="/dashboard">Dashboard</a><a href="/surveys">My Surveys</a><a href="/survey/new">New Survey</a></nav>
+</div></header>
+<main>
+<div class="heading"><div><h1>{{.Survey.Title}}</h1><p class="subtitle">VES survey details and field measurements</p></div><a class="btn secondary" href="/surveys">← Back to surveys</a></div>
+
+<section class="card" aria-labelledby="details-heading">
+<h2 id="details-heading">Survey information</h2>
+<dl class="details">
+<div><dt>Survey ID</dt><dd>{{.Survey.ID}}</dd></div>
+<div><dt>Location</dt><dd>{{if .Survey.Location}}{{.Survey.Location}}{{else}}Not provided{{end}}</dd></div>
+<div><dt>Terrain</dt><dd>{{if .Survey.TerrainType}}{{.Survey.TerrainType}}{{else}}Not specified{{end}}</dd></div>
+<div><dt>Number of layers</dt><dd>{{.Survey.NumberOfLayersInt}}</dd></div>
+<div><dt>Survey date</dt><dd>{{.Survey.Date.Format "02 Jan 2006"}}</dd></div>
+<div><dt>Latitude</dt><dd>{{.Survey.Latitude}}</dd></div>
+<div><dt>Longitude</dt><dd>{{.Survey.Longitude}}</dd></div>
+</dl>
+</section>
+
+<section class="card"><h2>Geologic history and observations</h2><p class="prose">{{if .Survey.GeologicHistory}}{{.Survey.GeologicHistory}}{{else}}No geologic observations recorded.{{end}}</p></section>
+<section class="card"><h2>Previous wells</h2><p class="prose">{{if .Survey.PreviousWells}}{{.Survey.PreviousWells}}{{else}}No information about previous wells recorded.{{end}}</p></section>
+
+<section class="card">
+<h2>VES measurements</h2>
+{{if .Measurements}}
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>AB/2 (m)</th><th>MN/2 (m)</th><th>Resistance, R (Ω)</th><th>Apparent resistivity, ρa (Ω·m)</th></tr></thead>
+<tbody>{{range $i, $m := .Measurements}}<tr>
+<td>{{$i}}</td><td class="numeric">{{$m.AB2}}</td><td class="numeric">{{$m.MN2}}</td><td class="numeric">{{$m.Resistance}}</td><td class="numeric">{{printf "%.2f" $m.ApparentResistivity}}</td>
+</tr>{{end}}</tbody>
+</table></div>
+{{else}}<p class="muted">No measurements have been recorded for this survey yet.</p>{{end}}
+</section>
+
+<div class="actions">
+<a class="btn secondary" href="/surveys">All surveys</a>
+<a class="btn primary" href="/survey/{{.Survey.ID}}/results">View interpretation results</a>
+<a class="btn secondary" href="/survey/{{.Survey.ID}}/edit">Edit survey</a>
+</div>
+</main>
+<footer>GeoResist — Electrical Resistivity Survey Platform</footer>
+</body>
+</html>

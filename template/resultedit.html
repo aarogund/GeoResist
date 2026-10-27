@@ -1,0 +1,453 @@
+{{define "resultedit.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Interpretation | GeoResist</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f4f7fb;
+            color: #263238;
+            line-height: 1.6;
+        }
+
+        header {
+            background: #123b5d;
+            color: white;
+            padding: 22px 6%;
+        }
+
+        header h1 { margin: 0; }
+        header p { margin: 5px 0 0; color: #dceaf5; }
+
+        nav { margin-top: 12px; }
+        nav a {
+            color: white;
+            text-decoration: none;
+            margin-right: 18px;
+        }
+
+        main {
+            max-width: 1100px;
+            margin: 30px auto;
+            padding: 0 18px;
+        }
+
+        .card {
+            background: white;
+            padding: 24px;
+            margin-bottom: 24px;
+            border-radius: 10px;
+            box-shadow: 0 3px 12px rgba(0,0,0,.06);
+        }
+
+        h2 { color: #123b5d; margin-top: 0; }
+        .muted { color: #657786; font-size: .92rem; }
+
+        .notice {
+            background: #fff7e6;
+            border-left: 4px solid #e0a12f;
+            padding: 12px 15px;
+            margin-bottom: 20px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 18px;
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .full { grid-column: 1 / -1; }
+
+        label {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #cbd5df;
+            border-radius: 6px;
+            font: inherit;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: 2px solid #9bc8e7;
+            border-color: #2879ad;
+        }
+
+        .table-wrapper { overflow-x: auto; }
+
+        table {
+            width: 100%;
+            min-width: 600px;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 10px;
+            border: 1px solid #dce3ea;
+            text-align: left;
+        }
+
+        th {
+            background: #edf3f8;
+            color: #123b5d;
+        }
+
+        td input { min-width: 110px; }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        .btn {
+            border: 0;
+            border-radius: 6px;
+            padding: 11px 18px;
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .primary { background: #176b45; color: white; }
+        .secondary { background: #e7edf3; color: #263238; }
+        .danger { background: #b42318; color: white; padding: 7px 10px; }
+
+        footer {
+            text-align: center;
+            padding: 24px;
+            color: #657786;
+        }
+
+        @media (max-width: 700px) {
+            .grid { grid-template-columns: 1fr; }
+            .full { grid-column: auto; }
+            .card { padding: 18px; }
+        }
+    </style>
+</head>
+
+<body>
+<header>
+    <h1>GeoResist</h1>
+    <p>Edit VES interpretation results</p>
+    <nav>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/surveys">My Surveys</a>
+        <a href="/survey/{{.Survey.ID}}">View Survey</a>
+        <a href="/survey/{{.Survey.ID}}/results">View Results</a>
+    </nav>
+</header>
+
+<main>
+    <form
+        id="result-edit-form"
+        action="/survey/{{.Survey.ID}}/results/edit"
+        method="POST"
+    >
+        <section class="card">
+            <h2>Interpretation Details</h2>
+            <p class="muted">
+                Survey: {{.Survey.Title}} — {{.Survey.Location}}
+            </p>
+
+            <div class="notice">
+                Editing this model changes the interpretation, not the original field
+                measurements. Save a revised interpretation only after checking that
+                the model remains geologically reasonable.
+            </div>
+
+            <div class="grid">
+                <div class="field">
+                    <label for="interpretation_name">Interpretation Name</label>
+                    <input
+                        type="text"
+                        id="interpretation_name"
+                        name="interpretation_name"
+                        value="{{.Results.InterpretationName}}"
+                        maxlength="150"
+                        placeholder="e.g. Revised three-layer model"
+                    >
+                </div>
+
+                <div class="field">
+                    <label for="number_of_layers">Number of Layers</label>
+                    <input
+                        type="number"
+                        id="number_of_layers"
+                        name="number_of_layers"
+                        min="1"
+                        max="10"
+                        value="{{.Model.NumberOfLayers}}"
+                        required
+                    >
+                </div>
+
+                <div class="field full">
+                    <label for="interpretation_notes">Interpretation Notes</label>
+                    <textarea
+                        id="interpretation_notes"
+                        name="interpretation_notes"
+                        rows="4"
+                        placeholder="Explain any manual adjustments, geological assumptions, or interpretation limitations."
+                    >{{.Results.Notes}}</textarea>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Layer Model</h2>
+            <p class="muted">
+                Resistivity is measured in Ω·m and layer thickness in metres.
+                The bottom layer is treated as the final half-space, so it has no
+                finite layer thickness.
+            </p>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Layer</th>
+                            <th>Resistivity (Ω·m)</th>
+                            <th>Thickness (m)</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="layers-body">
+                        {{range .Model.Layers}}
+                        <tr>
+                            <td class="layer-number"></td>
+                            <td>
+                                <input
+                                    type="number"
+                                    name="resistivity[]"
+                                    value="{{.Resistivity}}"
+                                    min="0.000001"
+                                    step="any"
+                                    required
+                                    aria-label="Layer resistivity"
+                                >
+                            </td>
+                            <td>
+                                <input
+                                    type="number"
+                                    name="thickness[]"
+                                    value="{{if .IsBottomLayer}}{{else}}{{.Thickness}}{{end}}"
+                                    min="0.000001"
+                                    step="any"
+                                    {{if .IsBottomLayer}}disabled{{end}}
+                                    aria-label="Layer thickness"
+                                >
+                            </td>
+                            <td>
+                                <button type="button" class="btn danger remove-layer">
+                                    Remove
+                                </button>
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="actions">
+                <button type="button" id="add-layer" class="btn secondary">
+                    + Add Layer
+                </button>
+            </div>
+
+            <p class="muted">
+                When adding or removing layers, the final layer becomes the bottom
+                half-space. Its thickness is not a finite parameter.
+            </p>
+        </section>
+
+        <section class="card">
+            <h2>Inversion Fit and Quality Control</h2>
+            <p class="muted">
+                These values are read-only indicators. They should be recalculated
+                by the server after inversion; manual layer edits alone do not
+                establish a new fit statistic.
+            </p>
+
+            <div class="grid">
+                <div class="field">
+                    <label for="log_rms">Log RMS Misfit</label>
+                    <input
+                        type="text"
+                        id="log_rms"
+                        value="{{.Results.LogRMS}}"
+                        readonly
+                    >
+                </div>
+
+                <div class="field">
+                    <label for="model_status">Model Status</label>
+                    <input
+                        type="text"
+                        id="model_status"
+                        value="{{.Results.Status}}"
+                        readonly
+                    >
+                </div>
+            </div>
+
+            <div class="actions">
+                <button
+                    type="submit"
+                    name="action"
+                    value="save"
+                    class="btn primary"
+                >
+                    Save Interpretation
+                </button>
+
+                <button
+                    type="submit"
+                    name="action"
+                    value="recalculate"
+                    class="btn secondary"
+                >
+                    Save and Recalculate Fit
+                </button>
+
+                <a
+                    href="/survey/{{.Survey.ID}}/results"
+                    class="btn secondary"
+                >
+                    Cancel
+                </a>
+            </div>
+        </section>
+    </form>
+</main>
+
+<footer>
+    GeoResist — Resistivity Data Platform
+</footer>
+
+<script>
+    const layersBody = document.getElementById("layers-body");
+    const numberOfLayers = document.getElementById("number_of_layers");
+
+    function updateLayers() {
+        const rows = Array.from(layersBody.querySelectorAll("tr"));
+        numberOfLayers.value = rows.length;
+
+        rows.forEach((row, index) => {
+            row.querySelector(".layer-number").textContent = index + 1;
+
+            const thickness = row.querySelector('[name="thickness[]"]');
+            const isBottomLayer = index === rows.length - 1;
+
+            thickness.disabled = isBottomLayer;
+            thickness.required = !isBottomLayer;
+
+            if (isBottomLayer) {
+                thickness.value = "";
+            }
+        });
+    }
+
+    function createLayerRow() {
+        const row = document.createElement("tr");
+
+        row.innerHTML = `
+            <td class="layer-number"></td>
+            <td>
+                <input type="number" name="resistivity[]" min="0.000001"
+                       step="any" required aria-label="Layer resistivity">
+            </td>
+            <td>
+                <input type="number" name="thickness[]" min="0.000001"
+                       step="any" required aria-label="Layer thickness">
+            </td>
+            <td>
+                <button type="button" class="btn danger remove-layer">Remove</button>
+            </td>
+        `;
+
+        return row;
+    }
+
+    document.getElementById("add-layer").addEventListener("click", () => {
+        if (layersBody.rows.length >= 10) {
+            alert("A maximum of 10 layers is allowed by this form.");
+            return;
+        }
+
+        layersBody.appendChild(createLayerRow());
+        updateLayers();
+    });
+
+    layersBody.addEventListener("click", (event) => {
+        const button = event.target.closest(".remove-layer");
+        if (!button) return;
+
+        if (layersBody.rows.length <= 1) {
+            alert("At least one layer is required.");
+            return;
+        }
+
+        button.closest("tr").remove();
+        updateLayers();
+    });
+
+    document.getElementById("result-edit-form").addEventListener("submit", (event) => {
+        const rows = Array.from(layersBody.querySelectorAll("tr"));
+
+        if (rows.length !== Number(numberOfLayers.value)) {
+            event.preventDefault();
+            alert("The number of layers does not match the model table.");
+            return;
+        }
+
+        for (let i = 0; i < rows.length; i++) {
+            const rho = Number(
+                rows[i].querySelector('[name="resistivity[]"]').value
+            );
+
+            if (!Number.isFinite(rho) || rho <= 0) {
+                event.preventDefault();
+                alert("Every layer must have a positive resistivity.");
+                return;
+            }
+
+            if (i < rows.length - 1) {
+                const thickness = Number(
+                    rows[i].querySelector('[name="thickness[]"]').value
+                );
+
+                if (!Number.isFinite(thickness) || thickness <= 0) {
+                    event.preventDefault();
+                    alert("Every finite layer must have a positive thickness.");
+                    return;
+                }
+            }
+        }
+    });
+
+    updateLayers();
+</script>
+</body>
+</html>
+{{end}}

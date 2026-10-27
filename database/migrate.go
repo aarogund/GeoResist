@@ -6,21 +6,8 @@ import (
 )
 
 func Migrate() {
-	// drop tables in correct order (respect foreign keys!)
-	drops := []string{
-		`DROP TABLE IF EXISTS measurements CASCADE`,
-		`DROP TABLE IF EXISTS reports CASCADE`,
-		`DROP TABLE IF EXISTS layers CASCADE`,
-		`DROP TABLE IF EXISTS surveys CASCADE`,
-		`DROP TABLE IF EXISTS users CASCADE`,
-		`DROP TABLE IF EXISTS token_blacklisted CASCADE`,
-	}
-	for _, query := range drops {
-		_, err := DB.Exec(query)
-		if err != nil {
-			log.Fatal("Drop error:", err)
-		}
-	}
+	// Migrations must never drop application tables: this function may run against
+	// a database containing real user data.
 
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS users (
@@ -89,6 +76,24 @@ func Migrate() {
             pdf_url             VARCHAR(500),
             created_at          TIMESTAMP DEFAULT NOW()
         )`,
+
+		`CREATE TABLE IF NOT EXISTS report_share_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    report_id INTEGER NOT NULL
+        REFERENCES reports(id) ON DELETE CASCADE,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    CHECK (expires_at > created_at)
+)`,
+
+		`CREATE INDEX IF NOT EXISTS idx_report_share_tokens_report_id
+    ON report_share_tokens(report_id)`,
+
+		`CREATE INDEX IF NOT EXISTS idx_report_share_tokens_expiry
+    ON report_share_tokens(expires_at)`,
+
 		`CREATE TABLE IF NOT EXISTS token_blacklisted (
             jti VARCHAR(36) PRIMARY KEY,
             expires_at TIMESTAMP NOT NULL,

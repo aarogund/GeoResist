@@ -1,0 +1,596 @@
+{{define "surveyedit.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Survey | GeoResist</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f4f7fb;
+            color: #263238;
+            line-height: 1.6;
+        }
+
+        header {
+            background: #123b5d;
+            color: white;
+            padding: 22px 6%;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 1.7rem;
+        }
+
+        header p {
+            margin: 5px 0 0;
+            color: #dceaf5;
+        }
+
+        nav {
+            margin-top: 12px;
+        }
+
+        nav a {
+            color: white;
+            margin-right: 18px;
+            text-decoration: none;
+            font-size: 0.95rem;
+        }
+
+        nav a:hover {
+            text-decoration: underline;
+        }
+
+        main {
+            max-width: 1100px;
+            margin: 30px auto;
+            padding: 0 18px;
+        }
+
+        .card {
+            background: white;
+            padding: 25px;
+            margin-bottom: 24px;
+            border-radius: 10px;
+            box-shadow: 0 3px 12px rgba(0, 0, 0, 0.06);
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #123b5d;
+            font-size: 1.25rem;
+        }
+
+        .section-description {
+            color: #657786;
+            margin-top: -8px;
+            margin-bottom: 20px;
+            font-size: 0.93rem;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 18px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        label {
+            margin-bottom: 6px;
+            font-weight: 600;
+            font-size: 0.93rem;
+        }
+
+        input,
+        select,
+        textarea {
+            width: 100%;
+            padding: 11px 12px;
+            border: 1px solid #cbd5df;
+            border-radius: 6px;
+            background: white;
+            color: #263238;
+            font: inherit;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: 2px solid #9bc8e7;
+            border-color: #2879ad;
+        }
+
+        textarea {
+            min-height: 105px;
+            resize: vertical;
+        }
+
+        .help-text {
+            color: #657786;
+            font-size: 0.82rem;
+            margin-top: 5px;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 700px;
+        }
+
+        th,
+        td {
+            border: 1px solid #dce3ea;
+            padding: 10px;
+            text-align: left;
+        }
+
+        th {
+            background: #edf3f8;
+            color: #123b5d;
+            font-size: 0.88rem;
+        }
+
+        td input {
+            min-width: 100px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        .btn {
+            display: inline-block;
+            border: none;
+            border-radius: 6px;
+            padding: 11px 18px;
+            font: inherit;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background: #176b45;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #105536;
+        }
+
+        .btn-secondary {
+            background: #e7edf3;
+            color: #263238;
+        }
+
+        .btn-secondary:hover {
+            background: #d5dfe8;
+        }
+
+        .btn-danger {
+            background: #b42318;
+            color: white;
+            padding: 7px 10px;
+            font-size: 0.85rem;
+        }
+
+        .btn-danger:hover {
+            background: #8f1c13;
+        }
+
+        .notice {
+            background: #fff7e6;
+            border-left: 4px solid #e0a12f;
+            padding: 12px 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-size: 0.92rem;
+        }
+
+        footer {
+            text-align: center;
+            color: #657786;
+            padding: 24px 12px;
+            font-size: 0.85rem;
+        }
+
+        @media (max-width: 700px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .full-width {
+                grid-column: auto;
+            }
+
+            .card {
+                padding: 18px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<header>
+    <h1>GeoResist</h1>
+    <p>Edit your electrical resistivity survey</p>
+
+    <nav>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/surveys">My Surveys</a>
+        <a href="/survey/{{.Survey.ID}}">View Survey</a>
+    </nav>
+</header>
+
+<main>
+    <form
+        action="/survey/{{.Survey.ID}}/edit"
+        method="POST"
+        enctype="multipart/form-data"
+        id="survey-edit-form"
+    >
+        <section class="card">
+            <h2>Survey Information</h2>
+            <p class="section-description">
+                Update the survey's identification, location, and geological information.
+            </p>
+
+            <div class="notice">
+                Changes will be saved to this survey. Check your measurement units and
+                geological information before submitting.
+            </div>
+
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="title">Survey Title *</label>
+                    <input
+                        type="text"
+                        id="title"
+                        name="title"
+                        value="{{.Survey.Title}}"
+                        required
+                        maxlength="150"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="location">Location *</label>
+                    <input
+                        type="text"
+                        id="location"
+                        name="location"
+                        value="{{.Survey.Location}}"
+                        required
+                        placeholder="Town, State"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="latitude">Latitude</label>
+                    <input
+                        type="number"
+                        id="latitude"
+                        name="latitude"
+                        value="{{if .Survey.Latitude}}{{.Survey.Latitude}}{{end}}"
+                        min="-90"
+                        max="90"
+                        step="any"
+                        placeholder="e.g. 7.2500"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="longitude">Longitude</label>
+                    <input
+                        type="number"
+                        id="longitude"
+                        name="longitude"
+                        value="{{if .Survey.Longitude}}{{.Survey.Longitude}}{{end}}"
+                        min="-180"
+                        max="180"
+                        step="any"
+                        placeholder="e.g. 5.2100"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="terrain_type">Terrain Type *</label>
+                    <select id="terrain_type" name="terrain_type" required>
+                        <option value="">Select terrain type</option>
+                        <option value="basement"
+                            {{if eq .Survey.TerrainType "basement"}}selected{{end}}>
+                            Basement Complex
+                        </option>
+                        <option value="sedimentary"
+                            {{if eq .Survey.TerrainType "sedimentary"}}selected{{end}}>
+                            Sedimentary Terrain
+                        </option>
+                        <option value="transition zone"
+                            {{if eq .Survey.TerrainType "transition zone"}}selected{{end}}>
+                            Transition Zone
+                        </option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="survey_date">Survey Date *</label>
+                    <input
+                        type="date"
+                        id="survey_date"
+                        name="survey_date"
+                        value="{{.Survey.Date.Format "2006-01-02"}}"
+                        required
+                    >
+                </div>
+
+                <div class="form-group full-width">
+                    <label for="geologic_history">Geological History and Field Observations</label>
+                    <textarea
+                        id="geologic_history"
+                        name="geologic_history"
+                        placeholder="Describe outcrops, fractures, weathering, lithology, drainage, and other relevant observations."
+                    >{{.Survey.GeologicHistory}}</textarea>
+                </div>
+
+                <div class="form-group full-width">
+                    <label for="previous_wells">Previous Wells and Groundwater Information</label>
+                    <textarea
+                        id="previous_wells"
+                        name="previous_wells"
+                        placeholder="Record nearby wells, their depths, water levels, yields, and any known drilling results."
+                    >{{.Survey.PreviousWells}}</textarea>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>VES Measurements</h2>
+            <p class="section-description">
+                Edit the existing readings or add new rows. AB/2 and MN/2 are electrode
+                spacings in metres. Enter the measured resistance in ohms and/or the
+                apparent resistivity in Ω·m, according to the input format your handler supports.
+            </p>
+
+            <div class="table-wrapper">
+                <table id="measurements-table">
+                    <thead>
+                        <tr>
+                            <th>AB/2 (m) *</th>
+                            <th>MN/2 (m) *</th>
+                            <th>Resistance (Ω)</th>
+                            <th>Apparent Resistivity (Ω·m)</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="measurements-body">
+                        {{range .Measurements}}
+                        <tr>
+                            <td>
+                                <input
+                                    type="number"
+                                    name="ab2[]"
+                                    value="{{.AB2}}"
+                                    min="0"
+                                    step="any"
+                                    required
+                                    aria-label="AB/2 spacing in metres"
+                                >
+                            </td>
+                            <td>
+                                <input
+                                    type="number"
+                                    name="mn2[]"
+                                    value="{{.MN2}}"
+                                    min="0"
+                                    step="any"
+                                    required
+                                    aria-label="MN/2 spacing in metres"
+                                >
+                            </td>
+                            <td>
+                                <input
+                                    type="number"
+                                    name="resistance[]"
+                                    value="{{if .Resistance}}{{.Resistance}}{{end}}"
+                                    min="0"
+                                    step="any"
+                                    aria-label="Resistance in ohms"
+                                >
+                            </td>
+                            <td>
+                                <input
+                                    type="number"
+                                    name="apparent_resistivity[]"
+                                    value="{{if .ApparentResistivity}}{{.ApparentResistivity}}{{end}}"
+                                    min="0"
+                                    step="any"
+                                    aria-label="Apparent resistivity in ohm metres"
+                                >
+                            </td>
+                            <td>
+                                <button type="button" class="btn btn-danger remove-row">
+                                    Remove
+                                </button>
+                            </td>
+                        </tr>
+                        {{else}}
+                        <tr>
+                            <td>
+                                <input type="number" name="ab2[]" min="0" step="any" required>
+                            </td>
+                            <td>
+                                <input type="number" name="mn2[]" min="0" step="any" required>
+                            </td>
+                            <td>
+                                <input type="number" name="resistance[]" min="0" step="any">
+                            </td>
+                            <td>
+                                <input type="number" name="apparent_resistivity[]" min="0" step="any">
+                            </td>
+                            <td>
+                                <button type="button" class="btn btn-danger remove-row">
+                                    Remove
+                                </button>
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="actions">
+                <button type="button" class="btn btn-secondary" id="add-row">
+                    + Add Measurement
+                </button>
+            </div>
+
+            <p class="help-text">
+                Keep the electrode spacings positive. Each measurement row should contain
+                a valid resistance and/or apparent resistivity value, depending on the
+                measurement input mode implemented by your server.
+            </p>
+        </section>
+
+        <section class="card">
+            <h2>Save Changes</h2>
+            <p class="section-description">
+                Review the updated details before saving.
+            </p>
+
+            <div class="actions">
+                <button type="submit" class="btn btn-primary">
+                    Save Changes
+                </button>
+
+                <a href="/survey/{{.Survey.ID}}" class="btn btn-secondary">
+                    Cancel
+                </a>
+            </div>
+        </section>
+    </form>
+</main>
+
+<footer>
+    GeoResist — Resistivity Data Platform
+</footer>
+
+<script>
+    const measurementsBody = document.getElementById("measurements-body");
+    const addRowButton = document.getElementById("add-row");
+
+    function createMeasurementRow() {
+        const row = document.createElement("tr");
+
+        row.innerHTML = `
+            <td>
+                <input type="number" name="ab2[]" min="0" step="any" required
+                       aria-label="AB/2 spacing in metres">
+            </td>
+            <td>
+                <input type="number" name="mn2[]" min="0" step="any" required
+                       aria-label="MN/2 spacing in metres">
+            </td>
+            <td>
+                <input type="number" name="resistance[]" min="0" step="any"
+                       aria-label="Resistance in ohms">
+            </td>
+            <td>
+                <input type="number" name="apparent_resistivity[]" min="0" step="any"
+                       aria-label="Apparent resistivity in ohm metres">
+            </td>
+            <td>
+                <button type="button" class="btn btn-danger remove-row">
+                    Remove
+                </button>
+            </td>
+        `;
+
+        return row;
+    }
+
+    addRowButton.addEventListener("click", function () {
+        measurementsBody.appendChild(createMeasurementRow());
+    });
+
+    measurementsBody.addEventListener("click", function (event) {
+        const removeButton = event.target.closest(".remove-row");
+
+        if (!removeButton) {
+            return;
+        }
+
+        const row = removeButton.closest("tr");
+
+        if (measurementsBody.rows.length > 1) {
+            row.remove();
+        } else {
+            row.querySelectorAll("input").forEach(function (input) {
+                input.value = "";
+            });
+        }
+    });
+
+    document.getElementById("survey-edit-form").addEventListener("submit", function (event) {
+        const rows = measurementsBody.querySelectorAll("tr");
+
+        for (const row of rows) {
+            const ab2 = row.querySelector('[name="ab2[]"]').value;
+            const mn2 = row.querySelector('[name="mn2[]"]').value;
+            const resistance = row.querySelector('[name="resistance[]"]').value;
+            const apparentResistivity =
+                row.querySelector('[name="apparent_resistivity[]"]').value;
+
+            if (Number(ab2) <= 0 || Number(mn2) <= 0) {
+                event.preventDefault();
+                alert("AB/2 and MN/2 must both be greater than zero.");
+                return;
+            }
+
+            if (resistance.trim() === "" && apparentResistivity.trim() === "") {
+                event.preventDefault();
+                alert(
+                    "Each measurement row must contain resistance or apparent resistivity."
+                );
+                return;
+            }
+
+            if (
+                (resistance.trim() !== "" && Number(resistance) < 0) ||
+                (apparentResistivity.trim() !== "" && Number(apparentResistivity) < 0)
+            ) {
+                event.preventDefault();
+                alert("Resistance and apparent resistivity cannot be negative.");
+                return;
+            }
+        }
+    });
+</script>
+</body>
+</html>
+{{end}}

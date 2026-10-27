@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Share GeoResist Report</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 760px;
+      margin: 32px auto;
+      padding: 0 18px;
+      color: #203044;
+      background: #f5f8fc;
+    }
+    .card {
+      background: #fff;
+      padding: 24px;
+      border-radius: 12px;
+      border: 1px solid #dce5ef;
+      margin-bottom: 18px;
+    }
+    h1, h2 { color: #173b60; }
+    label { display: block; margin: 12px 0 6px; font-weight: bold; }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 11px;
+      border: 1px solid #bac8d8;
+      border-radius: 6px;
+    }
+    button, .button {
+      display: inline-block;
+      padding: 11px 16px;
+      margin-top: 14px;
+      border: 0;
+      border-radius: 6px;
+      background: #1769aa;
+      color: white;
+      font-weight: bold;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .whatsapp { background: #16894b; }
+    .notice {
+      padding: 12px;
+      border-radius: 6px;
+      background: #e8f5eb;
+      color: #176034;
+    }
+    .error {
+      padding: 12px;
+      border-radius: 6px;
+      background: #ffeded;
+      color: #9a2525;
+    }
+    .muted { color: #617185; }
+    .url {
+      overflow-wrap: anywhere;
+      padding: 12px;
+      background: #f1f5f9;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <p><a href="/survey/{{.SurveyID}}">← Back to survey</a></p>
+
+  <div class="card">
+    <h1>Share survey report</h1>
+    <p><strong>{{.SurveyTitle}}</strong></p>
+    <p class="muted">{{.Location}}</p>
+
+    {{if .Message}}
+      <p class="notice">{{.Message}}</p>
+    {{end}}
+
+    {{if .Error}}
+      <p class="error">{{.Error}}</p>
+    {{end}}
+
+    <h2>Share through WhatsApp</h2>
+    <p>Create a secure PDF download link. The link expires after seven days.</p>
+
+    <form method="POST" action="/report/{{.SurveyID}}/share">
+      <input type="hidden" name="action" value="link">
+      <button type="submit">Generate WhatsApp link</button>
+    </form>
+
+    {{if .ShareURL}}
+      <p><strong>Secure report link</strong></p>
+      <div class="url">{{.ShareURL}}</div>
+      <p class="muted">
+        Expires: {{.ExpiresAt.Format "02 Jan 2006, 15:04 MST"}}
+      </p>
+      <a class="button whatsapp"
+         href="{{.WhatsAppURL}}"
+         target="_blank"
+         rel="noopener noreferrer">Open WhatsApp</a>
+    {{end}}
+  </div>
+
+  <div class="card">
+    <h2>Send PDF by email</h2>
+    <p>The generated PDF will be attached to the email.</p>
+
+    <form method="POST" action="/report/{{.SurveyID}}/share">
+      <input type="hidden" name="action" value="email">
+      <label for="email">Recipient email address</label>
+      <input
+        type="email"
+        id="email"
+        name="email"
+        placeholder="recipient@example.com"
+        maxlength="320"
+        required>
+      <button type="submit">Generate PDF and send email</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Download PDF</h2>
+    <p>You can also download the report directly.</p>
+    <a class="button" href="/report/{{.SurveyID}}/pdf">Download PDF</a>
+  </div>
+</body>
+</html>
