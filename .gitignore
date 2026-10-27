@@ -1,3 +1,5 @@
 .env
 *.env
 .env.local
+# Generated report PDFs contain potentially sensitive survey data.
+storage/reports/
