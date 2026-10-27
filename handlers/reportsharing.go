@@ -190,7 +190,7 @@ func reportPDFBytes(
 
 	pdf.SetFont("Arial", "B", 11)
 	drillDepth := fmt.Sprintf("%.2f", report.DrillDepth)
-	pdf.MultiCell(0, 6, "Recommended drill depth: "+drillDepth, "", "L", false)
+	pdf.MultiCell(0, 6, "Provisional investigation depth (screening estimate): "+drillDepth, "", "L", false)
 
 	aquifer := "No"
 	if report.AquiferDetected {
@@ -329,6 +329,27 @@ func createReportShareToken(
 	hashHex := hex.EncodeToString(hash[:])
 	expiresAt := time.Now().UTC().Add(lifetime)
 
+	// Keep link creation resilient on installations upgraded from older schema
+	// versions where the share-token migration may not yet have been applied.
+	// This is idempotent and uses the same schema as database/migrate.go.
+	if _, err := database.DB.ExecContext(r.Context(), `
+		CREATE TABLE IF NOT EXISTS report_share_tokens (
+			id BIGSERIAL PRIMARY KEY,
+			report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+			token_hash CHAR(64) NOT NULL UNIQUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			expires_at TIMESTAMPTZ NOT NULL,
+			revoked_at TIMESTAMPTZ,
+			CHECK (expires_at > created_at)
+		)`); err != nil {
+		return "", time.Time{}, fmt.Errorf("ensure report share-token table: %w", err)
+	}
+	if _, err := database.DB.ExecContext(r.Context(), `
+		CREATE INDEX IF NOT EXISTS idx_report_share_tokens_report_id
+		ON report_share_tokens(report_id)`); err != nil {
+		return "", time.Time{}, fmt.Errorf("ensure report share-token index: %w", err)
+	}
+
 	_, err := database.DB.ExecContext(
 		r.Context(),
 		`INSERT INTO report_share_tokens (report_id, token_hash, expires_at)
@@ -465,11 +486,6 @@ func ReportShareHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("render report share page: %v", err)
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("render report share page: %v", err)
 	}
@@ -659,10 +675,64 @@ func encodeBase64(dst, src []byte) {
 	}
 }
 
-// RevokeReportShareHandler revokes a link by its token. This handler is
-// intentionally not routed yet; use the token-management endpoint added later.
+// RevokeReportShareHandler revokes a share token only when it belongs to a
+// report for a survey owned by the authenticated user.
 func RevokeReportShareHandler(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Share-link revocation endpoint not configured", http.StatusNotImplemented)
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, ok := r.Context().Value(utils.UserContextKey).(int)
+	if !ok || userID <= 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	surveyID, err := strconv.Atoi(mux.Vars(r)["id"])
+	if err != nil || surveyID <= 0 {
+		http.Error(w, "Invalid survey ID", http.StatusBadRequest)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form", http.StatusBadRequest)
+		return
+	}
+	token := strings.TrimSpace(r.FormValue("token"))
+	if len(token) != 64 {
+		http.Error(w, "Invalid share token", http.StatusBadRequest)
+		return
+	}
+	if _, err := hex.DecodeString(token); err != nil {
+		http.Error(w, "Invalid share token", http.StatusBadRequest)
+		return
+	}
+	hash := sha256.Sum256([]byte(token))
+	hashHex := hex.EncodeToString(hash[:])
+	result, err := database.DB.ExecContext(r.Context(), `
+		UPDATE report_share_tokens rst
+		SET revoked_at = NOW()
+		FROM reports rp
+		JOIN surveys s ON s.id = rp.survey_id
+		WHERE rst.report_id = rp.id
+		  AND rp.survey_id = $1
+		  AND s.user_id = $2
+		  AND rst.token_hash = $3
+		  AND rst.revoked_at IS NULL`, surveyID, userID, hashHex)
+	if err != nil {
+		log.Printf("revoke report share token: %v", err)
+		http.Error(w, "Unable to revoke share link", http.StatusInternalServerError)
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, "Unable to verify share-link revocation", http.StatusInternalServerError)
+		return
+	}
+	if affected == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	http.Redirect(w, r, "/report/"+strconv.Itoa(surveyID)+"/share", http.StatusSeeOther)
 }
 
 // Keep html imported only if you add report preview rendering in this file.

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -235,13 +236,13 @@ func SurveyHandler(w http.ResponseWriter, r *http.Request) {
 			user_id,
 			title,
 			location,
-			terrain_type,
-			number_of_layers,
-			geologic_history,
-			previous_wells,
-			date,
-			latitude,
-			longitude
+			COALESCE(terrain_type, ''),
+			COALESCE(number_of_layers, 0),
+			COALESCE(geologic_history, ''),
+			COALESCE(previous_wells, ''),
+			COALESCE(date, created_at::date),
+			COALESCE(latitude, 0),
+			COALESCE(longitude, 0)
 		FROM surveys
 		WHERE id = $1 AND user_id = $2
 	`, surveyID, userID).Scan(
@@ -277,9 +278,9 @@ func SurveyHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := database.DB.Query(`
 		SELECT
 			ab2,
-			mn2,
-			resistance,
-			apparent_resistivity
+			COALESCE(mn2, 0),
+			COALESCE(resistance, 0),
+			COALESCE(apparent_resistivity, 0)
 		FROM measurements
 		WHERE survey_id = $1
 		ORDER BY ab2 ASC
@@ -357,11 +358,24 @@ func SurveyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type SurveyResultLayer struct {
+	Number      int
+	Resistivity float64
+	Thickness   float64
+	Depth       float64
+	Bottom      bool
+}
+
 type SurveyResultPage struct {
 	Survey            models.Survey
 	Measurements      []models.Measurement
 	NumberOfLayersInt int
 	GraphJSON         template.JS
+	CurveType         string
+	FitStatus         string
+	FitAvailable      bool
+	FitMetrics        utils.FitMetrics
+	FitLayers         []SurveyResultLayer
 }
 
 func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
@@ -401,13 +415,13 @@ func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
 			id,
 			title,
 			location,
-			terrain_type,
-			number_of_layers,
-			geologic_history,
-			previous_wells,
-			date,
-			latitude,
-			longitude
+			COALESCE(terrain_type, ''),
+			COALESCE(number_of_layers, 0),
+			COALESCE(geologic_history, ''),
+			COALESCE(previous_wells, ''),
+			COALESCE(date, created_at::date),
+			COALESCE(latitude, 0),
+			COALESCE(longitude, 0)
 		FROM surveys
 		WHERE id = $1 AND user_id = $2
 	`, surveyID, userID).Scan(
@@ -442,9 +456,9 @@ func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := database.DB.Query(`
 		SELECT
 			ab2,
-			mn2,
-			resistance,
-			apparent_resistivity
+			COALESCE(mn2, 0),
+			COALESCE(resistance, 0),
+			COALESCE(apparent_resistivity, 0)
 		FROM measurements
 		WHERE survey_id = $1
 		ORDER BY ab2 ASC
@@ -600,6 +614,11 @@ func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Keep this empty unless a valid fitted curve is produced.
 	computedRhoa := make([]float64, 0, len(measurements))
+	curveTypeName := "Unclassified"
+	fitStatus := "No valid fitted model is available for this dataset."
+	fitAvailable := false
+	fitMetrics := utils.FitMetrics{}
+	fitLayers := make([]SurveyResultLayer, 0)
 
 	// 8. Compare two-layer and three-layer models independently
 	// of the layer count saved with the survey.
@@ -770,6 +789,7 @@ func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
 					boundaries,
 					measurements,
 				)
+				curveTypeName = curveType
 
 				log.Printf(
 					"Survey %d: observed curve classification = %s",
@@ -824,6 +844,18 @@ func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
 							[]float64(nil),
 							fit.Computed...,
 						)
+						fitStatus = "Automatic inversion completed"
+						fitLayers = make([]SurveyResultLayer, len(fit.Resistivities))
+						cumulativeDepth := 0.0
+						for i, rho := range fit.Resistivities {
+							row := SurveyResultLayer{Number: i + 1, Resistivity: rho, Bottom: i == len(fit.Resistivities)-1}
+							if i < len(fit.Thicknesses) {
+								row.Thickness = fit.Thicknesses[i]
+								cumulativeDepth += fit.Thicknesses[i]
+								row.Depth = cumulativeDepth
+							}
+							fitLayers[i] = row
+						}
 
 						log.Printf(
 							"Survey %d: fitted resistivities = %v",
@@ -848,6 +880,66 @@ func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A user-saved interpretation takes precedence over a fresh automatic fit.
+	// The saved model is read-only here; a GET request must not write to the DB.
+	savedRows, savedErr := database.DB.QueryContext(r.Context(), `
+		SELECT COALESCE(resistivity, 0), COALESCE(thickness, 0)
+		FROM layers WHERE survey_id = $1 ORDER BY layer_number`, surveyID)
+	if savedErr != nil {
+		log.Printf("Survey %d: unable to load saved layer model: %v", surveyID, savedErr)
+	} else {
+		var savedRho, savedThickness []float64
+		for savedRows.Next() {
+			var rho, thickness float64
+			if scanErr := savedRows.Scan(&rho, &thickness); scanErr != nil {
+				log.Printf("Survey %d: unable to read saved layer model: %v", surveyID, scanErr)
+				savedRho = nil
+				break
+			}
+			savedRho = append(savedRho, rho)
+			savedThickness = append(savedThickness, thickness)
+		}
+		if rowsErr := savedRows.Err(); rowsErr != nil {
+			log.Printf("Survey %d: saved layer iteration failed: %v", surveyID, rowsErr)
+			savedRho = nil
+		}
+		_ = savedRows.Close()
+		if len(savedRho) > 0 && len(savedRho) == len(savedThickness) {
+			modelValid := true
+			for i, rho := range savedRho {
+				if !positiveFinite(rho) || (i < len(savedRho)-1 && !positiveFinite(savedThickness[i])) {
+					modelValid = false
+					break
+				}
+			}
+			if modelValid {
+				thicknesses := append([]float64(nil), savedThickness[:len(savedThickness)-1]...)
+				savedComputed := utils.ForwardModel(ab2Values, savedRho, thicknesses)
+				valid := len(savedComputed) == len(ab2Values)
+				for _, value := range savedComputed {
+					if !positiveFinite(value) {
+						valid = false
+						break
+					}
+				}
+				if valid {
+					computedRhoa = savedComputed
+					fitStatus = "Saved interpretation forward response"
+					fitLayers = make([]SurveyResultLayer, len(savedRho))
+					depth := 0.0
+					for i, rho := range savedRho {
+						fitLayers[i] = SurveyResultLayer{Number: i + 1, Resistivity: rho, Bottom: i == len(savedRho)-1}
+						if i < len(thicknesses) {
+							fitLayers[i].Thickness = thicknesses[i]
+							depth += thicknesses[i]
+							fitLayers[i].Depth = depth
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// 12. Calculate fit metrics only if the computed curve is valid
 	// and has exactly one value per observed measurement.
 	if len(computedRhoa) > 0 &&
@@ -865,6 +957,8 @@ func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
 				metricsErr,
 			)
 		} else {
+			fitMetrics = metrics
+			fitAvailable = true
 			log.Printf(
 				"Survey %d: fit points=%d logRMS=%.5f RMS%%=%.2f MAE%%=%.2f MaxAE%%=%.2f",
 				surveyID,
@@ -909,6 +1003,11 @@ func SurveyResultsHandler(w http.ResponseWriter, r *http.Request) {
 		Measurements:      measurements,
 		NumberOfLayersInt: layerCount,
 		GraphJSON:         template.JS(string(graphJSON)),
+		CurveType:         curveTypeName,
+		FitStatus:         fitStatus,
+		FitAvailable:      fitAvailable,
+		FitMetrics:        fitMetrics,
+		FitLayers:         fitLayers,
 	}
 
 	// 15. Render the results page.
@@ -1046,8 +1145,9 @@ func SurveyEditHandler(w http.ResponseWriter, r *http.Request) {
 
 		var survey models.Survey
 		err = database.DB.QueryRow(`
-			SELECT id, user_id, title, location, terrain_type,
-				geologic_history, previous_wells, date, latitude, longitude
+			SELECT id, user_id, title, location, COALESCE(terrain_type, ''),
+				COALESCE(geologic_history, ''), COALESCE(previous_wells, ''),
+				COALESCE(date, created_at::date), COALESCE(latitude, 0), COALESCE(longitude, 0)
 			FROM surveys
 			WHERE id = $1 AND user_id = $2
 		`, surveyID, userID).Scan(
@@ -1063,8 +1163,8 @@ func SurveyEditHandler(w http.ResponseWriter, r *http.Request) {
 
 		// fetch existing layers
 		layerRows, err := database.DB.Query(`
-			SELECT id, survey_id, layer_number, thickness, depth,
-				resistivity, lithology
+			SELECT id, survey_id, layer_number, COALESCE(thickness, 0),
+				COALESCE(depth, 0), COALESCE(resistivity, 0), COALESCE(lithology, '')
 			FROM layers
 			WHERE survey_id = $1
 			ORDER BY layer_number ASC
@@ -1093,7 +1193,7 @@ func SurveyEditHandler(w http.ResponseWriter, r *http.Request) {
 
 		// fetch measurements
 		measurementRows, err := database.DB.Query(`
-			SELECT ab2, mn2, resistance, apparent_resistivity
+			SELECT ab2, COALESCE(mn2,0), COALESCE(resistance,0), COALESCE(apparent_resistivity,0)
 			FROM measurements
 			WHERE survey_id = $1
 			ORDER BY ab2 ASC
@@ -1245,13 +1345,13 @@ func SurveysHandler(w http.ResponseWriter, r *http.Request) {
 			id,
 			title,
 			location,
-			terrain_type,
-			number_of_layers,
-			geologic_history,
-			previous_wells,
-			date,
-			latitude,
-			longitude
+			COALESCE(terrain_type, ''),
+			COALESCE(number_of_layers, 0),
+			COALESCE(geologic_history, ''),
+			COALESCE(previous_wells, ''),
+			COALESCE(date, created_at::date),
+			COALESCE(latitude, 0),
+			COALESCE(longitude, 0)
 		FROM surveys
 		WHERE user_id = $1
 		ORDER BY date DESC, id DESC
@@ -1361,184 +1461,343 @@ type ResultEditMetadata struct {
 	Status             string
 }
 
+// ResultEditHandler reads the saved layer model. If none exists yet, it shows
+// a clearly labelled numerical starting model; it does not claim that those
+// values are a geological interpretation.
 func ResultEditHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	// Assumes your authentication middleware stores an int user ID.
 	userID, ok := r.Context().Value(utils.UserContextKey).(int)
 	if !ok || userID <= 0 {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-
-	idText := mux.Vars(r)["id"]
-	surveyID, err := strconv.Atoi(idText)
-	if err != nil || surveyID <= 0 {
-		http.Error(w, "Invalid survey ID", http.StatusBadRequest)
-		return
-	}
-
-	// Replace database.DB with your actual *sql.DB variable.
-	// This query assumes an interpretations table linked to surveys.
-	var data ResultEditPageData
-
-	err = database.DB.QueryRowContext(r.Context(), `
-		SELECT
-			s.id,
-			s.title,
-			s.location,
-			i.id,
-			i.interpretation_name,
-			COALESCE(i.notes, ''),
-			COALESCE(i.log_rms, 0),
-			COALESCE(i.status, 'saved')
-		FROM surveys s
-		JOIN interpretations i ON i.survey_id = s.id
-		WHERE s.id = $1
-		  AND s.user_id = $2
-		ORDER BY i.id DESC
-		LIMIT 1
-	`, surveyID, userID).Scan(
-		&data.Survey.ID,
-		&data.Survey.Title,
-		&data.Survey.Location,
-		new(int), // Interpretation ID; use a field if needed by your update handler.
-		&data.Results.InterpretationName,
-		&data.Results.Notes,
-		&data.Results.LogRMS,
-		&data.Results.Status,
-	)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Survey or interpretation not found", http.StatusNotFound)
-			return
-		}
-
-		http.Error(w, "Could not load interpretation", http.StatusInternalServerError)
-		return
-	}
-
-	// Load the layer parameters for the selected interpretation.
-	// The query assumes interpretation_layers has an interpretation_id column.
-	// In production, retain the interpretation ID from the previous query
-	// and use it here instead of querying by survey alone.
-	//
-	// See the note below before using this example unchanged.
-
-	tmpl, err := template.ParseFiles("template/resultedit.html")
-	if err != nil {
-		http.Error(w, "Could not load edit page", http.StatusInternalServerError)
-		return
-	}
-
-	if err := tmpl.Execute(w, data); err != nil {
-		// Log the error server-side; avoid writing a second HTTP response.
-		return
-	}
-}
-func ResultUpdateHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, ok := r.Context().Value(utils.UserContextKey).(int)
-	if !ok || userID <= 0 {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	surveyID, err := strconv.Atoi(mux.Vars(r)["id"])
 	if err != nil || surveyID <= 0 {
 		http.Error(w, "Invalid survey ID", http.StatusBadRequest)
 		return
 	}
 
+	var data ResultEditPageData
+	var savedLayerCount sql.NullInt64
+	err = database.DB.QueryRowContext(r.Context(), `
+		SELECT id, title, location, number_of_layers
+		FROM surveys WHERE id = $1 AND user_id = $2`, surveyID, userID,
+	).Scan(&data.Survey.ID, &data.Survey.Title, &data.Survey.Location, &savedLayerCount)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		log.Printf("load survey for result editor: %v", err)
+		http.Error(w, "Could not load survey", http.StatusInternalServerError)
+		return
+	}
+
+	rows, err := database.DB.QueryContext(r.Context(), `
+		SELECT layer_number, COALESCE(thickness, 0), COALESCE(resistivity, 0),
+		       COALESCE(interpretation, '')
+		FROM layers WHERE survey_id = $1 ORDER BY layer_number`, surveyID)
+	if err != nil {
+		log.Printf("load saved layers: %v", err)
+		http.Error(w, "Could not load saved layer model", http.StatusInternalServerError)
+		return
+	}
+	var notes string
+	for rows.Next() {
+		var number int
+		var thickness, rho float64
+		var interpretation string
+		if err := rows.Scan(&number, &thickness, &rho, &interpretation); err != nil {
+			_ = rows.Close()
+			http.Error(w, "Could not read saved layer model", http.StatusInternalServerError)
+			return
+		}
+		data.Model.Layers = append(data.Model.Layers, ResultEditLayer{
+			Resistivity: rho, Thickness: thickness,
+		})
+		if notes == "" && strings.TrimSpace(interpretation) != "" {
+			notes = interpretation
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		http.Error(w, "Could not read saved layer model", http.StatusInternalServerError)
+		return
+	}
+	_ = rows.Close()
+
+	if len(data.Model.Layers) == 0 {
+		data.Results.Status = "No saved model — starting values only"
+		data.Results.InterpretationName = "Initial model"
+		// Use the median observed apparent resistivity as a neutral starting
+		// value; do not invent layer boundaries or aquifer depths.
+		measurements, loadErr := loadSurveyMeasurements(r.Context(), surveyID)
+		if loadErr != nil {
+			log.Printf("load measurements for result editor: %v", loadErr)
+			http.Error(w, "Could not load measurements", http.StatusInternalServerError)
+			return
+		}
+		valid := make([]float64, 0, len(measurements))
+		for _, m := range measurements {
+			if positiveFinite(m.ApparentResistivity) {
+				valid = append(valid, m.ApparentResistivity)
+			}
+		}
+		if len(valid) == 0 {
+			http.Error(w, "No valid apparent-resistivity measurements are available", http.StatusBadRequest)
+			return
+		}
+		sort.Float64s(valid)
+		median := valid[len(valid)/2]
+		layerCount := 1
+		if savedLayerCount.Valid && savedLayerCount.Int64 >= 1 && savedLayerCount.Int64 <= 10 {
+			layerCount = int(savedLayerCount.Int64)
+		}
+		maxAB2 := 0.0
+		for _, m := range measurements {
+			if positiveFinite(m.AB2) && m.AB2 > maxAB2 {
+				maxAB2 = m.AB2
+			}
+		}
+		thicknessGuess := maxAB2 / float64(layerCount+1)
+		for i := 0; i < layerCount; i++ {
+			layer := ResultEditLayer{Resistivity: median}
+			if i < layerCount-1 && positiveFinite(thicknessGuess) {
+				layer.Thickness = thicknessGuess
+			}
+			data.Model.Layers = append(data.Model.Layers, layer)
+		}
+	} else {
+		data.Results.Status = "Saved model"
+		data.Results.InterpretationName = "Saved layer model"
+		data.Results.Notes = notes
+	}
+	data.Model.NumberOfLayers = len(data.Model.Layers)
+	for i := range data.Model.Layers {
+		data.Model.Layers[i].IsBottomLayer = i == len(data.Model.Layers)-1
+	}
+
+	// Calculate a real fit score for the current model when possible.
+	measurements, loadErr := loadSurveyMeasurements(r.Context(), surveyID)
+	if loadErr == nil && len(measurements) >= len(data.Model.Layers) {
+		resistivities := make([]float64, len(data.Model.Layers))
+		thicknesses := make([]float64, len(data.Model.Layers)-1)
+		validModel := true
+		for i, layer := range data.Model.Layers {
+			if !positiveFinite(layer.Resistivity) {
+				validModel = false
+				break
+			}
+			resistivities[i] = layer.Resistivity
+			if i < len(thicknesses) {
+				if !positiveFinite(layer.Thickness) {
+					validModel = false
+					break
+				}
+				thicknesses[i] = layer.Thickness
+			}
+		}
+		if validModel {
+			ab2 := make([]float64, 0, len(measurements))
+			observed := make([]float64, 0, len(measurements))
+			for _, m := range measurements {
+				if positiveFinite(m.AB2) && positiveFinite(m.ApparentResistivity) {
+					ab2 = append(ab2, m.AB2)
+					observed = append(observed, m.ApparentResistivity)
+				}
+			}
+			computed := utils.ForwardModel(ab2, resistivities, thicknesses)
+			if metrics, metricErr := utils.CalculateFitMetrics(observed, computed); metricErr == nil {
+				data.Results.LogRMS = metrics.LogRMS
+				data.Results.Status = "Model fit calculated"
+			}
+		}
+	}
+
+	tmpl, err := template.ParseFiles("template/resultedit.html")
+	if err != nil {
+		log.Printf("parse result editor: %v", err)
+		http.Error(w, "Could not load edit page", http.StatusInternalServerError)
+		return
+	}
+	if err := tmpl.ExecuteTemplate(w, "resultedit.html", data); err != nil {
+		log.Printf("render result editor: %v", err)
+	}
+}
+
+// ResultUpdateHandler validates and transactionally saves the editable model.
+// The final layer is a half-space and therefore has no finite thickness.
+func ResultUpdateHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, ok := r.Context().Value(utils.UserContextKey).(int)
+	if !ok || userID <= 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	surveyID, err := strconv.Atoi(mux.Vars(r)["id"])
+	if err != nil || surveyID <= 0 {
+		http.Error(w, "Invalid survey ID", http.StatusBadRequest)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Invalid form submission", http.StatusBadRequest)
 		return
 	}
-
 	action := r.FormValue("action")
 	if action != "save" && action != "recalculate" {
 		http.Error(w, "Invalid action", http.StatusBadRequest)
 		return
 	}
+	resistivityValues := r.Form["resistivity[]"]
+	thicknessValues := r.Form["thickness[]"]
+	// The browser disables the bottom half-space thickness input, so standard
+	// form submission contains N resistivities and N-1 thicknesses. Accept N
+	// thickness fields as well for clients that submit an empty bottom value.
+	if len(resistivityValues) < 1 || len(resistivityValues) > 10 ||
+		(len(thicknessValues) != len(resistivityValues)-1 && len(thicknessValues) != len(resistivityValues)) {
+		http.Error(w, "Provide 1–10 layer resistivities and a positive thickness for each finite layer (all but the bottom half-space).", http.StatusBadRequest)
+		return
+	}
 
-	// Do not pretend that saving parameters recalculates the model.
-	// Implement recalculation through your actual forward-model/inversion
-	// service before accepting the "recalculate" action.
+	resistivities := make([]float64, len(resistivityValues))
+	thicknesses := make([]float64, len(resistivityValues)-1)
+	for i, raw := range resistivityValues {
+		v, parseErr := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if parseErr != nil || !positiveFinite(v) {
+			http.Error(w, fmt.Sprintf("Layer %d resistivity must be positive and finite", i+1), http.StatusBadRequest)
+			return
+		}
+		resistivities[i] = v
+		if i < len(thicknesses) {
+			if i >= len(thicknessValues) {
+				http.Error(w, fmt.Sprintf("Layer %d thickness is required", i+1), http.StatusBadRequest)
+				return
+			}
+			h, parseErr := strconv.ParseFloat(strings.TrimSpace(thicknessValues[i]), 64)
+			if parseErr != nil || !positiveFinite(h) {
+				http.Error(w, fmt.Sprintf("Layer %d thickness must be positive and finite", i+1), http.StatusBadRequest)
+				return
+			}
+			thicknesses[i] = h
+		}
+	}
+
+	// Ownership is checked inside the same transaction as the layer writes.
+	tx, err := database.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("begin model update transaction: %v", err)
+		http.Error(w, "Could not save model", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	var title string
+	if err := tx.QueryRowContext(r.Context(), `SELECT title FROM surveys WHERE id=$1 AND user_id=$2 FOR UPDATE`, surveyID, userID).Scan(&title); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		log.Printf("verify model owner: %v", err)
+		http.Error(w, "Could not verify survey ownership", http.StatusInternalServerError)
+		return
+	}
+
+	// If recalculation was requested, validate the forward response before any
+	// writes. The same saved parameters drive the results-page fitted curve.
 	if action == "recalculate" {
-		http.Error(
-			w,
-			"Recalculation service must be implemented before this action is available",
-			http.StatusNotImplemented,
-		)
-		return
-	}
-
-	resistivities := r.Form["resistivity[]"]
-	thicknesses := r.Form["thickness[]"]
-
-	if len(resistivities) == 0 || len(resistivities) != len(thicknesses) {
-		http.Error(w, "Invalid layer data", http.StatusBadRequest)
-		return
-	}
-
-	type LayerInput struct {
-		Resistivity float64
-		Thickness   float64
-	}
-
-	layers := make([]LayerInput, len(resistivities))
-
-	for i := range resistivities {
-		rho, err := strconv.ParseFloat(resistivities[i], 64)
-		if err != nil || rho <= 0 {
-			http.Error(
-				w,
-				"Each layer resistivity must be a positive number",
-				http.StatusBadRequest,
-			)
+		measurements, loadErr := loadSurveyMeasurements(r.Context(), surveyID)
+		if loadErr != nil {
+			log.Printf("load measurements for model recalculation: %v", loadErr)
+			http.Error(w, "Could not load measurements for recalculation", http.StatusInternalServerError)
 			return
 		}
-
-		layers[i].Resistivity = rho
-
-		// The final layer represents a half-space, so its thickness
-		// should not be submitted as a finite value.
-		if i == len(resistivities)-1 {
-			continue
+		ab2 := make([]float64, 0, len(measurements))
+		observed := make([]float64, 0, len(measurements))
+		for _, m := range measurements {
+			if positiveFinite(m.AB2) && positiveFinite(m.ApparentResistivity) {
+				ab2 = append(ab2, m.AB2)
+				observed = append(observed, m.ApparentResistivity)
+			}
 		}
-
-		thickness, err := strconv.ParseFloat(thicknesses[i], 64)
-		if err != nil || thickness <= 0 {
-			http.Error(
-				w,
-				"Finite-layer thicknesses must be positive numbers",
-				http.StatusBadRequest,
-			)
+		computed := utils.ForwardModel(ab2, resistivities, thicknesses)
+		if _, metricErr := utils.CalculateFitMetrics(observed, computed); metricErr != nil {
+			http.Error(w, "Model recalculation failed: check the model and ensure the forward-model filter data is installed", http.StatusUnprocessableEntity)
 			return
 		}
-
-		layers[i].Thickness = thickness
 	}
 
-	// TODO: persist the validated parameters in a database transaction.
-	// First verify that surveyID belongs to userID and identify the exact
-	// interpretation being edited. Update its layer rows only after that
-	// ownership check succeeds.
-	//
-	// Also persist the interpretation name and notes if those fields are
-	// editable in your template.
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM layers WHERE survey_id=$1`, surveyID); err != nil {
+		log.Printf("delete previous layers: %v", err)
+		http.Error(w, "Could not replace saved model", http.StatusInternalServerError)
+		return
+	}
+	stmt, err := tx.PrepareContext(r.Context(), `
+		INSERT INTO layers (survey_id, layer_number, thickness, depth, resistivity, lithology, interpretation, is_aquifer)
+		VALUES ($1,$2,$3,$4,$5,NULL,$6,FALSE)`)
+	if err != nil {
+		log.Printf("prepare layer insert: %v", err)
+		http.Error(w, "Could not save model", http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+	name := strings.TrimSpace(r.FormValue("interpretation_name"))
+	if name == "" {
+		name = "User-edited VES model"
+	}
+	notes := strings.TrimSpace(r.FormValue("interpretation_notes"))
+	interpretation := name
+	if notes != "" {
+		interpretation += " — " + notes
+	}
+	depth := 0.0
+	for i, rho := range resistivities {
+		if i < len(thicknesses) {
+			depth += thicknesses[i]
+		}
+		var thickness any
+		if i < len(thicknesses) {
+			thickness = thicknesses[i]
+		}
+		if _, err := stmt.ExecContext(r.Context(), surveyID, i+1, thickness, depth, rho, interpretation); err != nil {
+			log.Printf("insert model layer %d: %v", i+1, err)
+			http.Error(w, "Could not save all model layers", http.StatusInternalServerError)
+			return
+		}
+	}
+	if _, err := tx.ExecContext(r.Context(), `UPDATE surveys SET number_of_layers=$1 WHERE id=$2 AND user_id=$3`, len(resistivities), surveyID, userID); err != nil {
+		log.Printf("update survey layer count: %v", err)
+		http.Error(w, "Could not update survey model metadata", http.StatusInternalServerError)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("commit model update: %v", err)
+		http.Error(w, "Could not save model", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/survey/"+strconv.Itoa(surveyID)+"/results", http.StatusSeeOther)
+}
 
-	http.Redirect(
-		w,
-		r,
-		"/survey/"+strconv.Itoa(surveyID)+"/results",
-		http.StatusSeeOther,
-	)
+func loadSurveyMeasurements(ctx context.Context, surveyID int) ([]models.Measurement, error) {
+	rows, err := database.DB.QueryContext(ctx, `
+		SELECT ab2, COALESCE(mn2,0), COALESCE(resistance,0), COALESCE(apparent_resistivity,0)
+		FROM measurements WHERE survey_id=$1 ORDER BY ab2`, surveyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var measurements []models.Measurement
+	for rows.Next() {
+		var m models.Measurement
+		if err := rows.Scan(&m.AB2, &m.MN2, &m.Resistance, &m.ApparentResistivity); err != nil {
+			return nil, err
+		}
+		measurements = append(measurements, m)
+	}
+	return measurements, rows.Err()
 }

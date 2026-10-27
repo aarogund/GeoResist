@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -100,6 +102,119 @@ func renderReportPage(
 	}
 }
 
+// buildReportDefaults creates an editable draft from persisted survey metadata,
+// measurements, and the saved layer model. It deliberately avoids claiming an
+// aquifer or prescribing a drill depth from resistivity alone.
+func buildReportDefaults(ctx context.Context, surveyID int, title, location string) (models.Report, error) {
+	var terrain, geology, wells string
+	err := database.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(terrain_type,''), COALESCE(geologic_history,''), COALESCE(previous_wells,'')
+		FROM surveys WHERE id=$1`, surveyID).Scan(&terrain, &geology, &wells)
+	if err != nil {
+		return models.Report{}, err
+	}
+
+	var count int
+	var minRho, maxRho sql.NullFloat64
+	err = database.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*), MIN(apparent_resistivity), MAX(apparent_resistivity)
+		FROM measurements WHERE survey_id=$1 AND apparent_resistivity > 0`, surveyID).Scan(&count, &minRho, &maxRho)
+	if err != nil {
+		return models.Report{}, err
+	}
+	if count == 0 || !minRho.Valid || !maxRho.Valid {
+		return models.Report{}, errors.New("no positive apparent-resistivity measurements available")
+	}
+
+	var layerLines []string
+	var overburdenThickness float64
+	var candidateIntervals []string
+	var provisionalDrillDepth float64
+	layerRows, err := database.DB.QueryContext(ctx, `
+		SELECT layer_number, COALESCE(resistivity,0), COALESCE(thickness,0)
+		FROM layers WHERE survey_id=$1 ORDER BY layer_number`, surveyID)
+	if err != nil {
+		return models.Report{}, err
+	}
+	for layerRows.Next() {
+		var n int
+		var rho, thickness float64
+		if err := layerRows.Scan(&n, &rho, &thickness); err != nil {
+			_ = layerRows.Close()
+			return models.Report{}, err
+		}
+		if !positiveFinite(rho) {
+			continue
+		}
+		// In a 1-D layered model, finite layer thicknesses sum to the depth
+		// of the bottom of the modeled overburden. This is a model-derived
+		// estimate, not a geological basement pick.
+		if thickness > 0 {
+			overburdenThickness += thickness
+		}
+		// Broad screening only: moderate resistivity and meaningful thickness
+		// can flag a candidate interval, but cannot prove saturation or yield.
+		if n > 1 && thickness >= 3 && rho >= 10 && rho <= 150 {
+			top := overburdenThickness - thickness
+			bottom := overburdenThickness
+			candidateIntervals = append(candidateIntervals, fmt.Sprintf("Layer %d: %.1f–%.1f m depth (%.1f Ω·m; %.1f m thick; screening candidate only)", n, top, bottom, rho, thickness))
+			if provisionalDrillDepth == 0 {
+				provisionalDrillDepth = bottom
+			}
+		}
+		if n == 1 {
+			layerLines = append(layerLines, fmt.Sprintf("Layer %d: resistivity %.2f Ω·m, thickness %.2f m", n, rho, thickness))
+		} else if thickness > 0 {
+			layerLines = append(layerLines, fmt.Sprintf("Layer %d: resistivity %.2f Ω·m, thickness %.2f m", n, rho, thickness))
+		} else {
+			layerLines = append(layerLines, fmt.Sprintf("Layer %d: resistivity %.2f Ω·m (bottom half-space)", n, rho))
+		}
+	}
+	if err := layerRows.Err(); err != nil {
+		_ = layerRows.Close()
+		return models.Report{}, err
+	}
+	_ = layerRows.Close()
+
+	results := fmt.Sprintf("VES DATA SUMMARY\nValid apparent-resistivity observations: %d\nObserved apparent-resistivity range: %.2f–%.2f Ω·m.", count, minRho.Float64, maxRho.Float64)
+	if len(layerLines) > 0 {
+		results += "\n\nINTERPRETED GEOELECTRIC LAYER MODEL\n" + strings.Join(layerLines, "\n")
+	} else {
+		results += "\n\nINTERPRETED GEOELECTRIC LAYER MODEL\nNo saved layer model was available when this draft was generated. Open Results → Edit model, save/recalculate the model, then regenerate or update this report."
+	}
+	results += fmt.Sprintf("\n\nOVERBURDEN / MODEL THICKNESS ESTIMATE\nSum of finite modeled layer thicknesses: %.2f m. This represents the depth to the bottom of the finite layers in the current model; it is not automatically the depth to competent basement.\n", overburdenThickness)
+	if len(candidateIntervals) > 0 {
+		results += "\nPOTENTIAL WATER-BEARING INTERVALS (SCREENING ONLY)\n" + strings.Join(candidateIntervals, "\n")
+		results += fmt.Sprintf("\nProvisional investigation depth: approximately %.1f m (bottom of first flagged interval). This is a preliminary model-based target for field review, not a guaranteed drilling depth.", provisionalDrillDepth)
+	} else {
+		results += "\nPOTENTIAL WATER-BEARING INTERVALS\nNo interval met the broad screening criteria (resistivity 10–150 Ω·m and finite thickness ≥3 m). This does not rule out groundwater; review geology, terrain, curve shape, and local borehole records."
+	}
+	results += "\n\nHYDROGEOLOGICAL INTERPRETATION LIMITATION\nThese are heuristic screening flags, not automatic aquifer confirmation. Clay-rich zones can be conductive without being productive aquifers, and fractured/weathered basement can be resistive or conductive depending on saturation and lithology. Validate with local geology, nearby wells, and preferably borehole evidence before siting a borehole."
+
+	localGeology := strings.TrimSpace(geology)
+	if localGeology == "" {
+		localGeology = "No local geologic history or reconnaissance notes were entered."
+	}
+	if strings.TrimSpace(wells) != "" {
+		localGeology += "\n\nPrevious-well information: " + strings.TrimSpace(wells)
+	}
+	if strings.TrimSpace(terrain) != "" {
+		localGeology = "Recorded terrain type: " + terrain + ".\n\n" + localGeology
+	}
+
+	return models.Report{
+		SurveyID:         surveyID,
+		Introduction:     fmt.Sprintf("This report presents the vertical electrical sounding (VES) data collected for %q at %s. The report draft is populated from the survey record and entered measurements; the interpretation should be checked against field notes and local geology.", title, location),
+		ExecutiveSummary: fmt.Sprintf("A total of %d valid positive apparent-resistivity observations were recorded, spanning %.2f–%.2f Ω·m. %s", count, minRho.Float64, maxRho.Float64, "Any layer model shown below is a numerical interpretation, not independent proof of lithology or groundwater productivity."),
+		LocalGeology:     localGeology,
+		Methodology:      "Vertical Electrical Sounding (VES) data were reviewed using the recorded AB/2 spacing and apparent resistivity. The layer model is a 1-D interpretation of the sounding response; report the electrode array, spacing units, instrument details, inversion method, and fit statistic from field records before issuing the final report.",
+		Results:          results,
+		Discussion:       "Apparent resistivity is non-unique: different lithologies, saturation levels, clay content, weathering, and fractures can produce overlapping values. Review the fitted response alongside reconnaissance, borehole logs, and nearby well records. A low numerical misfit does not guarantee a unique subsurface model.",
+		Recommendations:  "Verify field data and electrode geometry; compare interpreted layer resistivities and thicknesses with reconnaissance, regional geology, and nearby borehole logs; investigate any flagged interval using independent evidence; and determine final borehole depth with a qualified hydrogeologist/driller. The listed interval and depth are preliminary screening estimates, not a guarantee of groundwater or yield.",
+		DrillDepth:       provisionalDrillDepth,
+	}, nil
+}
+
 // ReportNewHandler displays the form on GET and creates a report on POST.
 func ReportNewHandler(w http.ResponseWriter, r *http.Request) {
 	_, surveyID, surveyTitle, location, err := getReportContext(r)
@@ -137,6 +252,14 @@ func ReportNewHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Check existing report for survey %d: %v", surveyID, err)
 			http.Error(w, "Unable to check report", http.StatusInternalServerError)
 			return
+		}
+		defaults, defaultErr := buildReportDefaults(r.Context(), surveyID, surveyTitle, location)
+		if defaultErr != nil {
+			log.Printf("Build report defaults for survey %d: %v", surveyID, defaultErr)
+			// Keep the report form available even when optional summary data cannot
+			// be loaded; the user can still complete it manually.
+		} else {
+			data.Report = defaults
 		}
 
 		renderReportPage(w, "reportnew.html", data)
@@ -240,6 +363,19 @@ func ReportEditHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodGet {
+		// Reports may have been drafted before the layer model was saved. Refresh
+		// only the generated model section when it is absent; preserve other user edits.
+		if !strings.Contains(report.Results, "INTERPRETED GEOELECTRIC LAYER MODEL") {
+			defaults, draftErr := buildReportDefaults(r.Context(), surveyID, surveyTitle, location)
+			if draftErr == nil && strings.TrimSpace(defaults.Results) != "" {
+				if strings.TrimSpace(report.Results) == "" {
+					report.Results = defaults.Results
+				} else {
+					report.Results += "\n\n" + defaults.Results
+				}
+				data.Report = report
+			}
+		}
 		renderReportPage(w, "reportedit.html", data)
 		return
 	}

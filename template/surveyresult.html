@@ -128,6 +128,39 @@
 
         <hr>
 
+        <h2>Inversion Summary</h2>
+        <p><strong>Observed curve type:</strong> {{.CurveType}}</p>
+        <p><strong>Model status:</strong> {{.FitStatus}}</p>
+        {{if .FitAvailable}}
+        <div class="info-grid">
+            <div><strong>Log RMS:</strong> {{printf "%.5f" .FitMetrics.LogRMS}}</div>
+            <div><strong>RMS error:</strong> {{printf "%.2f" .FitMetrics.RMSPercent}}%</div>
+            <div><strong>Mean absolute error:</strong> {{printf "%.2f" .FitMetrics.MeanAbsolutePercent}}%</div>
+            <div><strong>Maximum absolute error:</strong> {{printf "%.2f" .FitMetrics.MaxAbsolutePercent}}%</div>
+            <div><strong>Points compared:</strong> {{.FitMetrics.Points}}</div>
+        </div>
+        {{end}}
+
+        {{if .FitLayers}}
+        <h3>Layer Model</h3>
+        <p class="muted">The final layer is a half-space. Layer parameters are inversion results or the saved user-edited model; they should be reviewed against local geology before operational decisions.</p>
+        <table>
+            <thead><tr><th>Layer</th><th>Resistivity (Ω·m)</th><th>Thickness (m)</th><th>Depth to base (m)</th></tr></thead>
+            <tbody>
+            {{range .FitLayers}}
+                <tr>
+                    <td>{{.Number}}</td>
+                    <td>{{printf "%.3f" .Resistivity}}</td>
+                    <td>{{if .Bottom}}Half-space{{else}}{{printf "%.2f" .Thickness}}{{end}}</td>
+                    <td>{{if .Bottom}}—{{else}}{{printf "%.2f" .Depth}}{{end}}</td>
+                </tr>
+            {{end}}
+            </tbody>
+        </table>
+        {{end}}
+
+        <hr>
+
         <h2>VES Curve</h2>
 
         <div class="chart-container">
@@ -454,8 +487,8 @@ document.addEventListener("DOMContentLoaded", function () {
             autorange: false,
 
             tickmode: "array",
-            tickvals: [1, 10, 100, 1000, 10000],
-            ticktext: ["1", "10", "100", "1000", "10000"],
+            tickvals: [100, 200, 500, 1000, 2000, 5000, 10000],
+            ticktext: ["100", "200", "500", "1000", "2000", "5000", "10000"],
 
             ticks: "outside",
             ticklen: 8,

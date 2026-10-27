@@ -37,3 +37,18 @@ Verify the full workflow in this order:
 6. **End-to-end database tests:** exercise create survey -> ingest measurements -> results -> edit/report, including rollback and cross-user access denial.
 
 The current runtime in this environment could not download the Go 1.25 toolchain, so these changes have been formatted but not compiled or test-run here. Run `go test ./...` with Go 1.25 and dependencies available before deployment.
+
+## Results, inversion, and report workflow additions
+- The results page now displays the observed curve classification, model status, layer parameters, and fit-quality metrics when a valid forward response is available.
+- A saved user-edited layer model takes precedence for the displayed computed curve; viewing results does not write to the database.
+- The result editor reads and saves the existing `layers` table instead of querying a nonexistent `interpretations` table. Saving is transaction-based and checks survey ownership before changing layer rows.
+- The “Save and Recalculate Fit” action now validates the proposed model with the forward model and fit-metric calculation before persisting it. The bottom layer is stored as a half-space with a nullable thickness.
+- The new-report form now starts with an editable draft generated from survey metadata, measurement counts/range, and any saved layer model. It explicitly avoids inferring aquifer presence or a drill depth from resistivity alone.
+- Report PDF, report sharing POST actions, and public expiring share-token downloads are wired into the router. Share-token revocation now checks survey ownership.
+- Nullable database values for survey metadata and measurement columns are normalized before scanning into non-nullable Go fields. The transition-zone form option now matches the server's accepted value.
+- The results and report views retain the logarithmic apparent-resistivity axis with the configured tick values 100, 200, 500, 1000, 2000, 5000, and 10000 Ω·m.
+
+## Validation note
+- `gofmt` completed for the changed Go files.
+- All Go files passed Go parser syntax checks, and all HTML templates parsed successfully with `html/template`.
+- Full `go test ./...` could not run in this environment: the project requests Go 1.25 and the environment only has Go 1.23.2; dependencies/toolchain downloads are blocked by network access. Run the full test suite in the project's normal Go 1.25 environment before deploying.

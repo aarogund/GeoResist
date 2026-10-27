@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"georesist/database"
 	"georesist/handlers"
 	"georesist/utils"
@@ -41,6 +40,17 @@ func main() {
 	r.HandleFunc("/verify-email", handlers.VerifyEmailHandler).Methods("GET")
 	r.HandleFunc("/forgot-password", handlers.ForgotPasswordHandler).Methods("GET", "POST")
 
+	// Expiring, token-protected report links are intentionally public; the
+	// handler validates the unguessable token and expiry before serving a PDF.
+	r.HandleFunc("/shared/report/{token}", handlers.SharedReportHandler).Methods("GET")
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, "./template/index.html")
+	}).Methods("GET")
+
 	// PROTECTED routes - auth required
 
 	protected := r.PathPrefix("").Subrouter()
@@ -57,19 +67,12 @@ func main() {
 	protected.HandleFunc("/report/{id}/new", handlers.ReportNewHandler).Methods("GET", "POST")
 	protected.HandleFunc("/report/{id}/edit", handlers.ReportEditHandler).Methods("GET", "POST")
 	protected.HandleFunc("/report/{id}/export", handlers.ReportExportHandler).Methods("GET")
-	protected.HandleFunc("/report/{id}/share", handlers.ReportShareHandler).Methods("GET")
+	protected.HandleFunc("/report/{id}/pdf", handlers.ReportPDFHandler).Methods("GET")
+	protected.HandleFunc("/report/{id}/share", handlers.ReportShareHandler).Methods("GET", "POST")
+	protected.HandleFunc("/report/{id}/share/revoke", handlers.RevokeReportShareHandler).Methods("POST")
 	protected.HandleFunc("/api/survey/{id}/curve", handlers.ApiSurveyIdHandler).Methods("GET")
 	protected.HandleFunc("/api/survey/{id}/layers", handlers.ApiSurveyLayersHandler).Methods("GET")
 	protected.HandleFunc("/report/{id}/email", handlers.ReportEmailHandler).Methods("POST")
-	protected.HandleFunc("/report/{id}/email", handlers.ReportEmailHandler).Methods("POST")
-
-	// static files
-	fs := http.FileServer(http.Dir("./static"))
-	http.Handle("/static/", http.StripPrefix("/static/", fs))
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "./template/index.html")
-	})
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -77,6 +80,4 @@ func main() {
 	}
 	log.Println("GeoResist running on port:", port)
 	log.Fatal(http.ListenAndServe(":"+port, r))
-	dir, _ := os.Getwd()
-	fmt.Println("Working directory:", dir)
 }
